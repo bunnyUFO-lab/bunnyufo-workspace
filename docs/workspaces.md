@@ -1013,19 +1013,22 @@ Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status
 
 ### Jobs the PC cannot start
 
-The runner on the PC only takes jobs of the projects in its `runs-config.json`, and only while launching is on. The Hub reads that from the PC report (`runner`, above) and judges every approved PC job in `site/api/hub-pc-wait.mjs`. The answer is a fixed list of causes, checked in this order:
+The runner on the PC only takes jobs of the projects in its `runs-config.json`, and only while launching is on. The Hub reads that from the PC report (`runner`, above) and judges every approved PC job in `site/api/hub-pc-wait.mjs`. A cause with no end in sight is a **block**; a queue that ends soon is a **wait**. Blocks, checked in this order:
 
 | Cause | When | The words | Fix shown |
 |---|---|---|---|
-| `pc-silent` | the newest status is over 15 minutes old | "The PC is not answering": it is probably asleep or off | Retry wakes the PC (when a wake is set up) |
+| `pc-silent` | the newest status is over 15 minutes old, or none is recent but this host has had a PC reporter | "The PC is not answering": it is probably asleep or off ("This PC hasn't reported lately" past 7 days) | Retry wakes the PC, only when a wake is set up |
 | `not-on-runner` | the project is not in `runner.projects` | "The PC does not run <project> yet" | the command `install.ps1 -AddRepo <path> -Yes`, run from the runner's checkout, or the cloud |
 | `launch-off` | `runner.launch` is false | "Starting jobs is off on the PC" | the command `install.ps1 -Runs -Launch on` |
-| `cap` | `runner.full` is set or a usage pause is on | "The PC is full for now" | none; the text says when it starts: when the run now going must end at the latest (its start plus its limit), tomorrow for the daily count, or when the pause ends |
+| `login-expired` | `runner.pausedReason` is `login-expired` | "The PC needs you to sign in again" | `claude auth login`, then `node dispatch.mjs resume` |
+| `cap` | a pause or a full cap with no known end, a daily cap, or an end more than 4 hours away | "The PC is full for now" or "paused for a while" | none; the text says when it starts |
 
-No status file at all, or a fresh status with no `runner` block, is unknown: the Hub says nothing. **Not alerts**: a job the runner will take but not yet is a **wait**, shown as a line on the job page and nowhere else: the owner is at the PC and the job opens windows (`approved.run.opensWindows`; the runner's `windows` rule), or the project already has a run going.
+**Waits** are never alerts. They show as a line on the job page: the owner is at the PC and the job opens windows (`approved.run.opensWindows`; the runner's `windows` rule); the project already has a run going (checked before the cap, so it holds when the runner allows one run at a time); `cap` and `usage-limit` that end within 4 hours (the time is in the line; a full concurrent cap ends when the running job's start plus its limit passes); `open-run` (the owner is in a resumed session at the PC); `add-repo` (an install is running). `pausedReason` is an enum (`usage-limit`, `login-expired`, `open-run`, `add-repo`); any other value is dropped.
+
+The status the verdict reads is the newest one in the last two days, else the newest in the last 7 days (by the day folders). With none in 7 days the verdict is `pc-silent` if the host has ever had a status, and unknown (no claim) if it never has. A fresh status without a `runner` block is also unknown.
 
 - **At approval.** `POST /requests/:id/approve` for the PC adds `pcWait` and, for a blocked job, `waiting` with one sentence. A PC that was just woken by the approval is not called silent. Spawn's note, the approval page's "Starts" line and the Approve toast say it instead of "within a few minutes". The job page (`GET /requests/:id`, `pcWait`) shows the 2 or 3 sentences, the step and the command in a copyable block, or the wait line.
-- **After 10 minutes.** An approved PC request with no `taken.json` for 10 minutes and a cause above is one **Needs you item** (`kind: 'pc-stuck'`, type "Job not started", under Sessions): a plain title, 2 or 3 sentences, the step with its copyable command, and the buttons that fit. Retry wakes the PC and shows only for `pc-silent`. "Run it in the cloud" is `move-to-cloud` and shows only when the job could run there; for a stuck job it is open before the 6 hours (the route asks the same verdict again). Cancel is the signed stop. It is not stored: it is worked out from the files each time, so there is one per job, it never repeats, and it is gone when the job is taken, stopped, moved, or the cause goes away.
+- **After 10 minutes.** An approved PC request with no `taken.json` for 10 minutes and a cause above is one **Needs you item** (`kind: 'pc-stuck'`, type "Job not started", under Sessions): a plain title, 2 or 3 sentences, the step with its copyable command, and the buttons that fit. Retry wakes the PC and shows only for `pc-silent` when a wake is set up. "Run it in the cloud" is `move-to-cloud` and shows only when the job could run there; for a stuck job it is open before the 6 hours (the route asks the same verdict again). Cancel is the signed stop. It is not stored: it is worked out from the files each time, so there is one per job, it never repeats, and it is gone when the job is taken, stopped, moved, or the cause goes away.
 
 ### Work
 

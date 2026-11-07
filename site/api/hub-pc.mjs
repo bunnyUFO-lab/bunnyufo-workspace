@@ -66,6 +66,8 @@ export function cleanHogs(raw) {
   return out;
 }
 
+/** Why the runner is paused: an enum, anything else is dropped. */
+export const PAUSE_REASONS = ['usage-limit', 'login-expired', 'open-run', 'add-repo'];
 const RUNNER_ID_RE = /^[a-z0-9-]{1,40}$/;
 
 /**
@@ -83,6 +85,7 @@ export function cleanRunner(raw) {
     busy: ids(raw.busy),
     full: raw.full === 'concurrent' || raw.full === 'day' ? raw.full : null,
     ...(until ? { pausedUntil: until } : {}),
+    ...(until && PAUSE_REASONS.includes(raw.pausedReason) ? { pausedReason: raw.pausedReason } : {}),
   };
 }
 

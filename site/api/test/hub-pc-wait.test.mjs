@@ -9,7 +9,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
-import { ADD_REPO_COMMAND, LAUNCH_ON_COMMAND, NOT_STARTED_MS, pcStartVerdict, pcWaitOf } from '../hub-pc-wait.mjs';
+import { ADD_REPO_COMMAND, LAUNCH_ON_COMMAND, LOGIN_COMMAND, NOT_STARTED_MS, pcStartVerdict, pcWaitOf } from '../hub-pc-wait.mjs';
 import { cleanRunner, validStatus } from '../hub-pc.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { createFakeRoutine } from './fake-routine.mjs';
@@ -66,22 +66,60 @@ test('verdict: a stale status or none means the PC is asleep or off, and can be 
   const v = pcStartVerdict({ project: 'probe', status: old, at: NOW, approvedAt: new Date(START - 12 * MIN).toISOString() });
   assert.deepEqual([v.cause, v.stuck, v.canWake], ['pc-silent', true, true]);
   assert.match(v.text, /not reported for about 30 minutes/);
-  assert.deepEqual(pcStartVerdict({ project: 'probe', status: null, at: NOW }), { known: false }, 'No status file at all: unknown, not silent.');
+  assert.deepEqual(pcStartVerdict({ project: 'probe', status: null, at: NOW }), { known: false }, 'No reporter ever: unknown, not silent.');
+  const lately = pcStartVerdict({ project: 'probe', status: null, silent: true, at: NOW });
+  assert.deepEqual([lately.cause, lately.canWake], ['pc-silent', true]);
+  assert.match(lately.text, /^This PC hasn't reported lately\./);
 });
 
-test('verdict: a full cap says when the job starts', () => {
+test('verdict: a full cap or a usage pause that ends soon is a wait with its time, never an alert', () => {
   const ends = [new Date(START + 40 * MIN).toISOString(), new Date(START + 90 * MIN).toISOString()];
-  const concurrent = verdict(undefined, { runner: { ...RUNNER, full: 'concurrent' }, endsAt: ends });
-  assert.equal(concurrent.cause, 'cap');
-  assert.match(concurrent.text, /in about 40 minutes at the latest/);
-  assert.equal(concurrent.until, ends[0]);
-  assert.match(verdict(undefined, { runner: { ...RUNNER, full: 'concurrent' } }).text, /when the run now going ends/);
-  assert.match(verdict(undefined, { runner: { ...RUNNER, full: 'day' } }).text, /tomorrow/);
-  const paused = verdict(undefined, { runner: { ...RUNNER, pausedUntil: new Date(START + 2 * 60 * MIN).toISOString() } });
-  assert.equal(paused.cause, 'cap');
-  assert.match(paused.text, /in about 2 hours, when the usage pause ends/);
-  const over = verdict(undefined, { runner: { ...RUNNER, pausedUntil: new Date(START - MIN).toISOString() } });
+  const concurrent = verdict(undefined, { runner: { ...RUNNER, full: 'concurrent' }, endsAt: ends, waited: 30 * MIN });
+  assert.equal(concurrent.blocked, false);
+  assert.equal(concurrent.wait.kind, 'cap');
+  assert.match(concurrent.wait.text, /in about 40 minutes at the latest/);
+  const soon = verdict(undefined, { runner: { ...RUNNER, pausedUntil: new Date(START + 2 * 60 * MIN).toISOString(), pausedReason: 'usage-limit' }, waited: 30 * MIN });
+  assert.equal(soon.blocked, false);
+  assert.equal(soon.wait.kind, 'usage-limit');
+  assert.match(soon.wait.text, /in about 2 hours, when the pause ends/);
+  const over = verdict(undefined, { runner: { ...RUNNER, pausedUntil: new Date(START - MIN).toISOString(), pausedReason: 'login-expired' } });
   assert.equal(over.blocked, false, 'A pause that has ended blocks nothing.');
+});
+
+test('verdict: a cap with no known end, a daily cap or a pause of many hours is an alert', () => {
+  const unknown = verdict(undefined, { runner: { ...RUNNER, full: 'concurrent' }, waited: 11 * MIN });
+  assert.deepEqual([unknown.cause, unknown.stuck], ['cap', true]);
+  assert.match(unknown.text, /when the run now going ends/);
+  const far = verdict(undefined, { runner: { ...RUNNER, full: 'concurrent' }, endsAt: [new Date(START + 9 * 60 * MIN).toISOString()], waited: 11 * MIN });
+  assert.equal(far.cause, 'cap');
+  assert.match(verdict(undefined, { runner: { ...RUNNER, full: 'day' } }).text, /tomorrow/);
+  const long = verdict(undefined, { runner: { ...RUNNER, pausedUntil: new Date(START + 6 * 60 * MIN).toISOString(), pausedReason: 'usage-limit' } });
+  assert.equal(long.cause, 'cap');
+  assert.match(long.text, /in about 6 hours, when the pause ends/);
+  assert.equal(long.until, new Date(START + 6 * 60 * MIN).toISOString());
+});
+
+test('verdict: a login that expired has its own title, text and the two commands', () => {
+  const v = verdict(undefined, { runner: { ...RUNNER, pausedUntil: new Date(START + 7 * 24 * 60 * MIN).toISOString(), pausedReason: 'login-expired' }, waited: 11 * MIN });
+  assert.deepEqual([v.cause, v.stuck, v.title, v.command], ['login-expired', true, 'The PC needs you to sign in again', LOGIN_COMMAND]);
+  assert.equal(LOGIN_COMMAND, 'claude auth login\nnode dispatch.mjs resume');
+  assert.ok(!/week|7 days|wait/i.test(v.text), 'It never tells the owner to wait a week.');
+});
+
+test('verdict: a resumed session at the PC and an install are short waits', () => {
+  const until = new Date(START + 60 * MIN).toISOString();
+  const open = verdict(undefined, { runner: { ...RUNNER, pausedUntil: until, pausedReason: 'open-run' }, waited: 30 * MIN });
+  assert.deepEqual([open.blocked, open.wait.kind], [false, 'open-run']);
+  assert.match(open.wait.text, /resumed session/);
+  const add = verdict(undefined, { runner: { ...RUNNER, pausedUntil: until, pausedReason: 'add-repo' }, waited: 30 * MIN });
+  assert.deepEqual([add.blocked, add.wait.kind], [false, 'add-repo']);
+  assert.match(add.wait.text, /installing a project/);
+});
+
+test('verdict: a run of the project is a wait even when one run is all the runner allows', () => {
+  const v = verdict(undefined, { runner: { ...RUNNER, busy: ['probe'], full: 'concurrent' }, waited: 30 * MIN });
+  assert.deepEqual([v.blocked, v.wait.kind], [false, 'busy']);
+  assert.equal(verdict(undefined, { runner: { ...RUNNER, busy: ['other'], full: 'concurrent' }, endsAt: [new Date(START + 30 * MIN).toISOString()] }).wait.kind, 'cap', 'Another project is the full cap.');
 });
 
 test('verdict: waiting for the owner to be away, or for a run of the project, is a wait and never blocked', () => {
@@ -105,6 +143,10 @@ test('status: the runner block keeps ids, booleans and one time, and drops anyth
   assert.equal(cleanRunner('x'), undefined);
   const clean = cleanRunner({ projects: ['probe', 'C:\\work\\runs\\app', '/Users/x/app', 'a'.repeat(50), 'probe', 7], launch: 'yes', busy: ['probe'], full: 'everything', pausedUntil: 'not a time', extra: 'C:\\x' });
   assert.deepEqual(clean, { projects: ['probe'], launch: false, busy: ['probe'], full: null });
+  const until = '2026-11-06T13:00:00.000Z';
+  assert.equal(cleanRunner({ ...RUNNER, pausedUntil: until, pausedReason: 'open-run' }).pausedReason, 'open-run');
+  assert.equal(cleanRunner({ ...RUNNER, pausedUntil: until, pausedReason: 'C:\\secret' }).pausedReason, undefined, 'An enum only.');
+  assert.equal(cleanRunner({ ...RUNNER, pausedReason: 'open-run' }).pausedReason, undefined, 'No reason without a time.');
   assert.deepEqual(validStatus(pcStatusJson({ now: NOW, extra: { runner: RUNNER } })).runner, RUNNER);
   assert.equal(validStatus(pcStatusJson({ now: NOW })).runner, undefined);
 });
@@ -237,8 +279,8 @@ test('the item clears itself when the job is taken, stopped or the runner gets t
 
 test('each cause files the right item: launching off, the PC silent, a full cap', async () => {
   // A fresh bucket for each: the newest status file wins, so one story per fixture.
-  const story = async (runner, minutesOld = 0) => {
-    const f = await fixture();
+  const story = async (runner, minutesOld = 0, env = {}) => {
+    const f = await fixture({ env });
     try {
       f.report(runner, { minutesOld });
       const made = await f.pcJob();
@@ -250,9 +292,19 @@ test('each cause files the right item: launching off, the PC silent, a full cap'
   const off = await story({ ...RUNNER, launch: false });
   assert.deepEqual([off.length, off[0].cause, off[0].command, off[0].title], [1, 'launch-off', LAUNCH_ON_COMMAND, 'Starting jobs is off on the PC']);
 
-  const silent = await story(RUNNER, 30);
+  const silent = await story(RUNNER, 30, { HUB_WAKE_URL: 'http://127.0.0.1:9/never-called' });
   assert.deepEqual([silent.length, silent[0].cause, silent[0].canWake], [1, 'pc-silent', true]);
   assert.equal(silent[0].command, undefined);
+  const noWake = await story(RUNNER, 30);
+  assert.deepEqual([noWake.length, noWake[0].cause, noWake[0].canWake], [1, 'pc-silent', undefined], 'Retry only when a wake is set up.');
+
+  const login = await story({ ...RUNNER, pausedUntil: new Date(START + 7 * 24 * 60 * MIN).toISOString(), pausedReason: 'login-expired' });
+  assert.deepEqual([login.length, login[0].cause, login[0].command], [1, 'login-expired', LOGIN_COMMAND]);
+  const queue = await story({ ...RUNNER, pausedUntil: new Date(START + 2 * 60 * MIN).toISOString(), pausedReason: 'usage-limit' });
+  assert.deepEqual(queue, [], 'A 2-hour usage pause is a queue.');
+  for (const pausedReason of ['open-run', 'add-repo']) {
+    assert.deepEqual(await story({ ...RUNNER, pausedUntil: new Date(START + 60 * MIN).toISOString(), pausedReason }), [], pausedReason);
+  }
 
   const cap = await story({ ...RUNNER, full: 'day' });
   assert.deepEqual([cap.length, cap[0].cause], [1, 'cap']);
@@ -266,13 +318,17 @@ test('a full concurrent cap says when the run now going must end', async () => {
     f.report({ ...RUNNER, full: 'concurrent', busy: ['other'] });
     const running = await f.pcJob({ project: 'other' });
     f.fake.seed(`sections/inbox/requests/${running.request.id}/taken.json`, JSON.stringify({ v: 1, runner: 'pc', host: 'pc', at: new Date(START).toISOString() }), 'application/json');
-    f.fake.seed(`sections/inbox/requests/${running.request.id}/run-20261106T120100Z.json`, JSON.stringify({ v: 1, state: 'running', at: new Date(START + MIN).toISOString() }), 'application/json');
+    f.fake.seed(`sections/inbox/requests/${running.request.id}/run-20261106T120100000Z-ab12.json`, JSON.stringify({ v: 1, state: 'running', at: new Date(START + MIN).toISOString() }), 'application/json');
     f.clock.time = START + 30 * MIN;
     f.report({ ...RUNNER, full: 'concurrent', busy: ['other'] });
     const waiting = await f.pcJob();
+    f.clock.time = START + 50 * MIN;
+    f.fake.seed(`sections/inbox/requests/${running.request.id}/run-20261106T124900000Z-ab12.json`, JSON.stringify({ v: 1, state: 'running', at: new Date(START + 49 * MIN).toISOString() }), 'application/json');
+    f.report({ ...RUNNER, full: 'concurrent', busy: ['other'] });
     const view = await f.detail(waiting.request.id);
-    assert.equal(view.pcWait.cause, 'cap');
-    assert.match(view.pcWait.text, /(in about \d+ (minutes|hours?) at the latest|as soon as), when the run now going ends|when the run now going ends/);
+    assert.deepEqual([view.pcWait.state, view.pcWait.kind], ['wait', 'cap'], 'A normal queue is a line on the job page.');
+    assert.match(view.pcWait.text, /in about \d+ (minutes|hours?) at the latest, when the run now going ends/);
+    assert.deepEqual(await f.stuck(), [], 'No item.');
   } finally { await f.close(); }
 });
 
@@ -349,4 +405,38 @@ test('Cancel stops the job, and the cloud is open to a stuck job but not to one 
     assert.equal(cancelled.status, 201);
     assert.deepEqual((await f.stuck()).filter(row => row.id === c.request.id), []);
   } finally { await f.close(); }
+});
+
+test('the PC status lookback: 3 days old is silent, 8 days old and never are told apart', async () => {
+  const days = n => 24 * 60 * n;
+  // Reported 3 days ago: the 7-day lookback still finds it.
+  const three = await fixture();
+  try {
+    three.report(RUNNER, { minutesOld: days(3) });
+    const job = await three.pcJob();
+    assert.equal(job.approved.pcWait.cause, 'pc-silent');
+    assert.match(job.approved.pcWait.text, /not reported for about 3 days/);
+    assert.match(job.approved.waiting, /asleep or off/);
+  } finally { await three.close(); }
+  // Reported 8 days ago: nothing recent, but there was a reporter.
+  const eight = await fixture();
+  try {
+    eight.report(RUNNER, { minutesOld: days(8) });
+    const job = await eight.pcJob();
+    assert.equal(job.approved.pcWait.cause, 'pc-silent');
+    assert.match(job.approved.pcWait.text, /^This PC hasn't reported lately\./);
+    eight.clock.time = START + 11 * MIN;
+    const [item] = await eight.stuck();
+    assert.equal(item.cause, 'pc-silent');
+    assert.equal((await eight.call('GET', '/hub/pc/start?project=probe')).body.pcWait.state, 'blocked');
+  } finally { await eight.close(); }
+  // No reporter has ever posted: the Hub says nothing.
+  const never = await fixture();
+  try {
+    const job = await never.pcJob();
+    assert.equal(job.approved.pcWait, undefined);
+    assert.equal(job.approved.waiting, undefined);
+    never.clock.time = START + 60 * MIN;
+    assert.deepEqual(await never.stuck(), []);
+  } finally { await never.close(); }
 });

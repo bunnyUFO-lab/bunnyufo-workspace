@@ -351,20 +351,45 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
    * Spawn (`/hub/pc/start`), the job page and the move-to-cloud route use it; the lists below carry the same verdict on each row.
    */
   async function pcVerdict({ project, approvedAt = null, opensWindows = false, at }) {
-    const status = await loadPcStatus(at).catch(() => null);
-    let verdict = pcStartVerdict({ project, status, at, approvedAt, opensWindows });
-    if (verdict.cause === 'cap' && !verdict.until) verdict = pcStartVerdict({ project, status, at, approvedAt, opensWindows, endsAt: pcEndsAt(await requestFiles.loadRequests(at).catch(() => [])) });
-    return pcWaitOf(verdict);
+    const { status, silent } = await loadVerdictStatus(at);
+    let verdict = pcStartVerdict({ project, status, silent, at, approvedAt, opensWindows });
+    if (status?.runner?.full === 'concurrent') verdict = pcStartVerdict({ project, status, silent, at, approvedAt, opensWindows, endsAt: pcEndsAt(await requestFiles.loadRequests(at).catch(() => [])) });
+    return withWake(pcWaitOf(verdict), at);
+  }
+  /** Retry (wake the PC) is offered only when a wake is set up. */
+  const withWake = (wait, at) => (wait?.canWake && !wake.available ? { ...wait, canWake: undefined } : wait);
+  /**
+   * The status the verdict reads. The newest one in the last two days is `loadPcStatus`; past that, up to 7 days back by the day folders
+   * (`pc/status-<day>T`). With none in 7 days, `silent` says whether this host has had a PC reporter at all: if so the PC "has not reported
+   * lately", if never the Hub makes no claim.
+   */
+  async function loadVerdictStatus(at) {
+    const near = await loadPcStatus(at).catch(() => null);
+    if (near) return { status: near, silent: false };
+    const { prefixes } = await bucket.list(key('pc/status-'), { delimiter: 'T' }).catch(() => ({ prefixes: [] }));
+    const days = prefixes.map(prefix => /status-(\d{8})T$/.exec(prefix)?.[1]).filter(Boolean).sort();
+    if (!days.length) return { status: null, silent: false };
+    const newest = days.at(-1);
+    if (newest >= markStamp(new Date(at.getTime() - 7 * DAY)).slice(0, 8)) {
+      const { objects } = await bucket.list(key(`pc/status-${newest}`)).catch(() => ({ objects: [] }));
+      const names = objects.map(object => object.key.slice(folder('pc').length)).filter(name => /^status-\d{8}T\d{6,9}Z\.json$/.test(name)).sort();
+      for (const name of names.slice(-3).reverse()) {
+        const got = await fresh(`pc/${name}`);
+        const status = got && got.text.length <= STATUS_MAX_BYTES ? validStatus(got.value) : null;
+        if (status) return { status, silent: false };
+      }
+    }
+    return { status: null, silent: true };
   }
   /** Each approved PC job in the list gets its `pcWait` (one status read for all of them); `pcJob` is only the input and is dropped. */
   async function withPcWait(rows, at) {
     if (!rows.some(row => row.pcJob)) return rows;
-    const status = await loadPcStatus(at).catch(() => null);
+    const { status, silent } = await loadVerdictStatus(at);
     const endsAt = pcEndsAt(rows);
     return rows.map(row => {
       if (!row.pcJob) return row;
       const { pcJob, ...rest } = row;
-      const wait = pcWaitOf(pcStartVerdict({ project: row.project, status, at, approvedAt: pcJob.approvedAt, opensWindows: pcJob.opensWindows, endsAt }));
+      const wait = withWake(pcWaitOf(pcStartVerdict({ project: row.project, status, silent, at, approvedAt: pcJob.approvedAt, opensWindows: pcJob.opensWindows, endsAt })), at);
       return wait ? { ...rest, pcWait: { ...wait, ...(wait.state === 'stuck' && pcJob.cloudOk ? { cloudOk: true } : {}) } } : rest;
     });
   }
