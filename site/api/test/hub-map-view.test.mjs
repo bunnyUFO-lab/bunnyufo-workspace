@@ -10,6 +10,7 @@ import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.
 import { PROJECT_TABS, TASK_PAGE, currentMilestone, listed, orderedTasks, roadmapList, tabCounts, tabOf } from '../../../src/hub/projectPage.ts';
 import { parseProjectId, projectHash, projectNodeHash } from '../../../src/lib/route.ts';
 import { buildMap } from '../hub-map.mjs';
+import { sprintModel, sprintsOf } from '../../../src/hub/sprintScope.ts';
 import { beadsIssue } from './hub-fixtures.mjs';
 import { FULL, UNFILED, branchModel, branchTarget, childrenOf, crumbs, milestoneDots, parseSaved, resolveBranch, rowsOf } from '../../../src/hub/mapBranch.ts';
 
@@ -595,4 +596,45 @@ test('the map names each sprint after the group issue that carries its label', (
   const by = Object.fromEntries(map.sprints.map(row => [row.name, row]));
   assert.equal(by.s5.title, 'Sprint 5: the big one', 'The sub group has a parent with the label, so the epic names it.');
   assert.equal('title' in by.s4, false, 'No group issue carries the label: no title.');
+});
+
+// sprintScope.ts: the sprints of a project and its map narrowed to one.
+const sTask = (id, state, sprints) => ({ id, title: id, state, status: state === 'done' ? 'closed' : 'open', signs: [], deps: [], sprints, prs: [] });
+const sprintMap = () => ({
+  project: 'p', meta: null, ageMinutes: null,
+  milestones: [
+    { id: 'm1', title: 'M1', state: 'doing', roadmap: 'r1', features: [
+      { id: 'f1', title: 'F1', state: 'doing', tasks: [sTask('t1', 'done', ['a']), sTask('t2', 'doing', ['a', 'b']), sTask('t3', 'next', [])] },
+      { id: 'f2', title: 'F2', state: 'later', tasks: [sTask('t4', 'later', [])] },
+    ] },
+    { id: 'm2', title: 'M2', state: 'done', features: [{ id: 'f3', title: 'F3', state: 'done', tasks: [sTask('t5', 'done', ['b']), sTask('t6', 'done', ['c'])] }] },
+    { id: 'm3', title: 'M3', state: 'later', features: [{ id: 'f4', title: 'F4', state: 'later', tasks: [sTask('t7', 'later', [])] }] },
+  ],
+  // The map lists its bands oldest first.
+  sprints: [{ name: 'c', title: 'Sprint C', milestones: [{ id: 'm2', count: 1, total: 2 }] }, { name: 'b', milestones: [{ id: 'm1', count: 1, total: 3 }, { id: 'm2', count: 1, total: 2 }] }, { name: 'a', title: 'Sprint A', milestones: [{ id: 'm1', count: 2, total: 3 }] }],
+  roadmaps: [{ id: 'r1', title: 'R1', state: 'doing' }],
+});
+
+test('sprintsOf counts done of all from the tasks: open sprints first, then the newest, the finished last', () => {
+  assert.deepEqual(sprintsOf(sprintMap()), [
+    { name: 'a', title: 'Sprint A', done: 1, total: 2 },
+    { name: 'b', done: 1, total: 2 },
+    { name: 'c', title: 'Sprint C', done: 1, total: 1 },
+  ]);
+  assert.deepEqual(sprintsOf({ milestones: [], sprints: [] }), []);
+});
+
+test('sprintModel keeps the milestones, features and tasks of one sprint and drops the roadmaps', () => {
+  const full = sprintMap();
+  const narrowed = sprintModel(full, 'a');
+  assert.deepEqual(narrowed.milestones.map(milestone => milestone.id), ['m1']);
+  assert.deepEqual(narrowed.milestones[0].features.map(feature => [feature.id, feature.tasks.map(task => task.id)]), [['f1', ['t1', 't2']]]);
+  assert.equal(narrowed.milestones[0].state, 'doing');
+  assert.equal('roadmap' in narrowed.milestones[0], false);
+  assert.deepEqual(narrowed.roadmaps, []);
+  assert.deepEqual(narrowed.sprints.map(band => band.name), ['a']);
+  assert.equal(full.milestones[0].features[0].tasks.length, 3, 'The whole map is left as it was.');
+  const finished = sprintModel(full, 'c');
+  assert.deepEqual(finished.milestones.map(milestone => [milestone.id, milestone.state]), [['m2', 'done']], 'A milestone with only done sprint tasks reads as done.');
+  assert.deepEqual(sprintModel(full, 'nothing').milestones, []);
 });

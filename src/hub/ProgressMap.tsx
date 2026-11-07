@@ -62,7 +62,7 @@ const SETTLE_MS = 150
  * project (a known one), the read of the map and the header; this draws the map inside a box that takes the room left. The project alone decides
  * what is fetched and drawn, so opening a panel never reloads the map.
  */
-export default function ProgressMap({ project, name, nodeId, model, error, loading, at }: { project: string; name: string; nodeId?: string; model: MapModel | null; error: string | null; loading: boolean; at: Date | null }) {
+export default function ProgressMap({ project, name, nodeId, model, panelModel, error, loading, at }: { project: string; name: string; nodeId?: string; model: MapModel | null; /** The whole project when `model` is narrowed to a sprint: a node outside it still opens its details. */ panelModel?: MapModel; error: string | null; loading: boolean; at: Date | null }) {
   return (
     <div className="hub-mapview" data-map-view>
       <h2 className="hub-sr">Roadmap · {name}</h2>
@@ -72,7 +72,7 @@ export default function ProgressMap({ project, name, nodeId, model, error, loadi
       {model?.meta && (
         <Fragment key={project}>
           {(() => {
-            const found = nodeId ? find(model, nodeId) : null
+            const found = nodeId ? find(panelModel ?? model, nodeId) : null
             const selected = found ? { id: nodeId as string, title: found.kind === 'm' ? found.milestone.title : found.kind === 'f' ? found.feature.title : found.task.title } : null
             const plan = <PlanInHermes project={project} projectName={name} selected={selected} />
             const way = model.wayfinder
@@ -82,7 +82,7 @@ export default function ProgressMap({ project, name, nodeId, model, error, loadi
             // A project with roadmaps shows one part of them at a time; one without draws the map as it always has.
             return model.roadmaps?.length
               ? <Branched model={model} project={project} projectName={name} param={nodeId} header={header} />
-              : <MapView model={model} project={project} nodeId={nodeId} header={header} />
+              : <MapView model={model} panelModel={panelModel} project={project} nodeId={nodeId} header={header} />
           })()}
         </Fragment>
       )}
@@ -304,7 +304,7 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
   }, [layout])
 
   // The panel the model has for the address; an id the model does not know opens nothing and leaves the address alone.
-  const shownId = nodeId && find(fullModel, nodeId) ? nodeId : null
+  const shownId = nodeId && find(panelModel ?? fullModel, nodeId) ? nodeId : null
   useLayoutEffect(() => { shown.current = shownId }, [shownId])
 
   // Semantic zoom: the milestone, then the feature, under the pointer opens as you zoom in; what zoom opened folds as you zoom out.
@@ -658,7 +658,7 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
           </div>
         )}
       </div>
-      {shownId && <MapPanel model={panelModel ?? fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} hiddenBy={find(model, shownId) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
+      {shownId && <MapPanel model={panelModel ?? fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} hiddenBy={find(model, shownId) || (panelModel && !find(fullModel, shownId)) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
     </>
   )
 }

@@ -48,10 +48,10 @@ try {
     beadsIssue({ id: 'ml-m0', title: 'Prototype', type: 'milestone', status: 'closed', closed: '2026-10-03T10:00:00Z', ...stamp }),
     closedTask('ml-t0', 'Throw the prototype together', 'ml-m0'),
     beadsIssue({ id: 'ml-m1', title: 'Core loop', type: 'milestone', ...stamp }),
-    beadsIssue({ id: 'ml-f1', title: 'Movement', type: 'epic', parent: 'ml-m1', ...stamp }),
-    closedTask('ml-t1', 'Run', 'ml-f1'), closedTask('ml-t2', 'Jump', 'ml-f1'),
-    beadsIssue({ id: 'ml-t3', title: 'Wall-jump', parent: 'ml-f1', status: 'in_progress', ...stamp }),
-    beadsIssue({ id: 'ml-t4', title: 'Dash', parent: 'ml-f1', ...stamp }),
+    beadsIssue({ id: 'ml-f1', title: 'Movement', type: 'epic', parent: 'ml-m1', labels: ['sprint:sprint-5'], ...stamp }),
+    closedTask('ml-t1', 'Run', 'ml-f1'), { ...closedTask('ml-t2', 'Jump', 'ml-f1'), labels: ['sprint:sprint-5'] },
+    beadsIssue({ id: 'ml-t3', title: 'Wall-jump', parent: 'ml-f1', status: 'in_progress', labels: ['sprint:sprint-5'], ...stamp }),
+    beadsIssue({ id: 'ml-t4', title: 'Dash', parent: 'ml-f1', labels: ['sprint:sprint-5'], ...stamp }),
   ]);
   copy('sprite-studio', [beadsIssue({ id: 'ss-m1', title: 'Editor', type: 'milestone', status: 'closed', closed: '2026-10-03T10:00:00Z', ...stamp }), closedTask('ss-t1', 'Draw', 'ss-m1')]);
   for (const [project, prefix] of [['workspace-app', 'ws'], ['bunnylink', 'bl']]) copy(project, [beadsIssue({ id: `${prefix}-m1`, title: 'First milestone', type: 'milestone', ...stamp }), beadsIssue({ id: `${prefix}-t1`, title: 'Open task', parent: `${prefix}-m1`, ...stamp })]);
@@ -60,7 +60,7 @@ try {
     beadsIssue({ id: 'rd-r1', title: 'Hub work', type: 'epic', labels: ['roadmap'], ...stamp }),
     beadsIssue({ id: 'rd-f1', title: 'First ring', type: 'feature', parent: 'rd-r1', ...stamp }),
     closedTask('rd-t1', 'Done thing', 'rd-f1'),
-    beadsIssue({ id: 'rd-t2', title: 'Open thing', parent: 'rd-f1', ...stamp }),
+    beadsIssue({ id: 'rd-t2', title: 'Open thing', parent: 'rd-f1', labels: ['sprint:sprint-6'], ...stamp }),
     beadsIssue({ id: 'rd-r2', title: 'Editing', type: 'epic', parent: 'rd-r1', labels: ['roadmap'], ...stamp }),
     beadsIssue({ id: 'rd-t3', title: 'Loose thing', parent: 'rd-r2', ...stamp }),
   ]);
@@ -382,6 +382,63 @@ try {
   assert.equal(await narrow.locator('[aria-label="Working now"]').count(), 0, 'Below 1000 px the Running panel is the Running tab only.');
   assert.equal(await narrow.locator('[data-tabs]').count(), 0, 'A project page is a page of its own on a phone: no tab bar, a Back button instead.');
   assert.equal(await narrow.locator('[data-top="detail"] [data-back]').count(), 1);
+
+  const go2 = (view, target) => view.evaluate(next => { location.hash = next; }, target);
+  step('project page with a sprint: the picker row, the list narrowed to the sprint, the header count, a sheet, the Map, the Work tab link, an empty sprint');
+  const sprintPage = await open({ width: 1280, height: 900 });
+  await goPage(sprintPage, '#/~hub/project/magic-loops?sprint=sprint-5');
+  await sprintPage.locator('[data-pp-sprint-row]').waitFor();
+  assert.equal(await sprintPage.locator('[data-filter-sprint]').inputValue(), 'Movement · 1 of 3 done', 'The group that carries the label names the sprint.');
+  assert.equal((await sprintPage.locator('[data-pp-sprint-count]').innerText()).trim(), '1 of 3 done');
+  assert.equal(await sprintPage.locator('[data-pp-sprint-board]').getAttribute('href'), '#/~hub/work?project=magic-loops&sprint=sprint-5');
+  await sprintPage.locator('[data-pp-roadmap] [data-pp-milestone]').first().waitFor();
+  assert.deepEqual(await sprintPage.locator('[data-pp-roadmap] [data-pp-milestone]').evaluateAll(list => list.map(item => item.getAttribute('data-pp-milestone'))), ['ml-m1'], 'Only the milestone with a task in the sprint.');
+  assert.deepEqual(await sprintPage.locator('[data-pp-roadmap] [data-pp-task]').evaluateAll(list => list.map(item => item.getAttribute('data-pp-task'))), ['ml-t3', 'ml-t4', 'ml-t2']);
+  assert.equal(await sprintPage.locator('[data-pp-done-toggle]').count(), 0, 'The finished Prototype milestone is not in the sprint.');
+  assert.equal((await sprintPage.locator('[data-project-done]').innerText()).trim(), '1 of 3 tasks done.', 'The header counts the sprint.');
+  const sprintDepth = await sprintPage.evaluate(() => history.length);
+  await sprintPage.locator('[data-filter-sprint]').click();
+  assert.deepEqual(await sprintPage.locator('.cb-list [role="option"]').evaluateAll(list => list.map(item => item.getAttribute('data-value'))), ['', 'sprint-5']);
+  await sprintPage.locator('.cb-list [role="option"][data-value=""]').click();
+  await sprintPage.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
+  await sprintPage.waitForFunction(() => document.querySelectorAll('[data-pp-roadmap] [data-pp-task]').length === 4);
+  assert.equal(await sprintPage.evaluate(() => history.length), sprintDepth, 'A pick adds no history entry.');
+  assert.equal(await sprintPage.locator('[data-pp-sprint-board]').count(), 0, 'No sprint, no board link.');
+  await sprintPage.locator('[data-filter-sprint]').click();
+  await sprintPage.locator('.cb-list [role="option"][data-value="sprint-5"]').click();
+  await sprintPage.waitForFunction(() => location.hash === '#/~hub/project/magic-loops?sprint=sprint-5');
+  await sprintPage.locator('[data-pp-task="ml-t3"]').click();
+  await sprintPage.waitForFunction(() => location.hash === '#/~hub/project/magic-loops/roadmap/ml-t3?sprint=sprint-5');
+  await sprintPage.locator('.hub-map-panel').waitFor();
+  await sprintPage.goBack();
+  await sprintPage.waitForFunction(() => location.hash === '#/~hub/project/magic-loops?sprint=sprint-5');
+  await sprintPage.locator('[data-roadmap-view="map"]').click();
+  await sprintPage.waitForFunction(() => location.hash === '#/~hub/map/magic-loops?sprint=sprint-5');
+  await sprintPage.locator('.hub-map-box svg').waitFor();
+  assert.equal(await sprintPage.locator('[data-filter-sprint]').inputValue(), 'Movement · 1 of 3 done', 'The picker stays on the Map.');
+  await go2(sprintPage, '#/~hub/map/magic-loops/ml-t1?sprint=sprint-5');
+  await sprintPage.locator('.hub-map-panel').waitFor();
+  assert.match(await sprintPage.locator('.hub-map-panel').innerText(), /Run/, 'A node outside the sprint still opens its details.');
+  await go2(sprintPage, '#/~hub/project/magic-loops/work?sprint=sprint-5');
+  await sprintPage.locator('[data-pp-work]').waitFor();
+  assert.equal((await sprintPage.locator('[data-pp-work] [data-pp-sprint-board]').innerText()).trim(), 'Open Movement on the board ›');
+  assert.equal(await sprintPage.locator('[data-pp-sprint-row]').count(), 0, 'The Work tab has no picker: it is not filtered.');
+  await go2(sprintPage, '#/~hub/project/magic-loops?sprint=nothing');
+  await sprintPage.locator('[data-pp-sprint-empty]').waitFor();
+  assert.match(await sprintPage.locator('[data-pp-sprint-empty]').innerText(), /No tasks in this sprint\./);
+  assert.equal(await sprintPage.locator('[data-filter-sprint]').inputValue(), 'nothing', 'A sprint the list lacks still shows.');
+  await sprintPage.locator('[data-pp-sprint-clear]').click();
+  await sprintPage.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
+  await go2(sprintPage, '#/~hub/project/roadmapped?sprint=sprint-6');
+  await sprintPage.locator('[data-pp-roadmap] [data-pp-milestone]').first().waitFor();
+  assert.equal(await sprintPage.locator('[data-pp-roadmap-rows]').count(), 0, 'A sprint uses the milestone list even for a project with roadmaps.');
+
+  step('project page with a sprint at 390 px: the row fits and the picker is 44 px');
+  const sprintPhone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+  await goPage(sprintPhone, '#/~hub/project/magic-loops?sprint=sprint-5');
+  await sprintPhone.locator('[data-pp-sprint-row]').waitFor();
+  assert.deepEqual(await small(sprintPhone, '[data-filter-sprint], [data-pp-sprint-board]'), [], 'The picker and the board link are 44 px.');
+  assert.equal(await sprintPhone.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true, 'No sideways scroll.');
 
   console.log('hub-needs-project-ui: passed');
 } finally {

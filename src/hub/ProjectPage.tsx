@@ -5,7 +5,7 @@ import { ago } from '../lib/hub'
 import { host } from '../lib/host'
 import { needsHref } from '../lib/needsView.mjs'
 import { useScope } from '../lib/useScope'
-import { hubHash, mapHash, parseProjectId, projectHash, projectNodeHash } from '../lib/route'
+import { hubHash, mapHash, parseProjectId, projectHash, projectNodeHash, workBoardHash } from '../lib/route'
 import { swap } from '../lib/entries'
 import Icon from '../ui/Icon'
 import { Button } from '../ui/Controls'
@@ -18,6 +18,8 @@ import PlanInHermes from './PlanInHermes'
 import ProgressMap from './ProgressMap'
 import ProjectRing from './ProjectRing'
 import RoadmapRows from './RoadmapRows'
+import SprintPicker, { sprintCount } from './SprintPicker'
+import { sprintModel, sprintsOf } from './sprintScope.ts'
 import RunsOnChip, { RUNS_ON } from './RunsOnChip'
 import WorkingNow from './WorkingNow'
 import { tallyOf, tallyWords } from './mapCount.ts'
@@ -126,13 +128,17 @@ function RoadmapList({ project, model, onOpen }: { project: string; model: MapMo
 }
 
 /** The Roadmap list: one row per milestone, from the same read as the map. A project with roadmaps lists them, nested, as it did. */
-function RoadmapTab({ project, model, error, loading, at, onOpen }: { project: string; model: MapModel | null; error: string | null; loading: boolean; at: Date | null; onOpen: OpenNode }) {
+function RoadmapTab({ project, model, sprint, error, loading, at, onOpen }: { project: string; model: MapModel | null; /** The sprint's own map, when one is on. */ sprint?: MapModel; error: string | null; loading: boolean; at: Date | null; onOpen: OpenNode }) {
   if (!model) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
   return (
     <>
       <RefreshNote error={error} hasData at={at} />
       {!model.meta
         ? <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>
+        : sprint
+          ? (sprint.milestones.length
+            ? <RoadmapList project={project} model={sprint} onOpen={onOpen} />
+            : <p className="hub-empty" data-pp-sprint-empty>No tasks in this sprint. <a className="pp-link" href={projectHash(project)} data-pp-sprint-clear>Show the whole roadmap ›</a></p>)
         : model.roadmaps?.length
           ? <div data-pp-roadmap-rows><RoadmapRows project={project} model={model} search={false} /></div>
           : <RoadmapList project={project} model={model} onOpen={onOpen} />}
@@ -199,7 +205,7 @@ function CardsTab({ project }: { project: string }) {
 }
 
 /** Work: what waits on you, what runs, the project's jobs, and what agents wrote to its Library section. */
-function WorkTab({ project, name, today }: { project: string; name: string; today: TodayData | null }) {
+function WorkTab({ project, name, today, sprint }: { project: string; name: string; today: TodayData | null; /** The sprint in the address, which the rest of this tab does not filter by. */ sprint?: { name: string; label: string } }) {
   const jobs = useHubData<JobsView>(`/jobs?project=${enc(project)}`)
   const cards = useCardSection(project, true).data
   const running = today && (() => {
@@ -209,6 +215,7 @@ function WorkTab({ project, name, today }: { project: string; name: string; toda
   const rows = (jobs.data?.jobs ?? []).slice(0, 10)
   return (
     <div className="pj-work" data-pp-work>
+      {sprint && <p className="pp-foot"><a className="pp-link" href={workBoardHash(project, sprint.name)} data-pp-sprint-board>Open {sprint.label} on the board ›</a></p>}
       <NeedsTab project={project} name={name} today={today} />
       {running}
       <section className="hub-panel" aria-label="Jobs" data-pp-jobs>
@@ -267,9 +274,8 @@ function NowBlock({ project, model, runsOn, onOpen }: { project: string; model: 
  * tabs (Roadmap, Work, Cards). The Roadmap is a list with a Map one tap away, and the switch between them swaps the address, adding no history
  * entry. A milestone or task opens its details over the list (the Roadmap's panel, as a Work card does), so closing returns to the list.
  */
-export default function ProjectPage({ project: wanted, route, view }: { project: string; route?: string; view: 'list' | 'map' }) {
+export default function ProjectPage({ project: wanted, route, view, sprint }: { project: string; route?: string; view: 'list' | 'map'; /** `?sprint=`: the Roadmap narrows to it. */ sprint?: string }) {
   const { tab: rawTab, node: listNode } = parseProjectId(route)
-  const { sprint } = useScope()
   const mapNode = view === 'map' ? route?.split('/').slice(1).join('/') || undefined : undefined
   const tab = view === 'map' ? 'roadmap' : tabOf(rawTab)
   const node = view === 'map' ? mapNode : listNode
@@ -314,8 +320,13 @@ export default function ProjectPage({ project: wanted, route, view }: { project:
   const item = all.data?.projects.find(row => row.id === project)
   const name = item?.name ?? project
   const counts = today ? tabCounts(today, project) : null
-  const done = model?.meta ? tallyOf(model.milestones.flatMap(tasksOfMilestone)) : null
+  // With a sprint on, the Roadmap, Now and the header's count read the sprint's own map; the sheet and `find` keep the whole one.
+  const scoped = sprint && model?.meta ? sprintModel(model, sprint) : undefined
+  const sprints = model?.meta ? sprintsOf(model) : []
+  const sprintRow = sprint ? sprints.find(row => row.name === sprint) : undefined
+  const done = model?.meta ? tallyOf((scoped ?? model).milestones.flatMap(tasksOfMilestone)) : null
   const mapShown = view === 'map'
+  const pickSprint = (name: string) => swap(view === 'map' ? mapHash(project, undefined, name || undefined) : projectHash(project, undefined, name || undefined))
   const switchTo = (to: 'list' | 'map') => { if (to !== view) swap(to === 'map' ? mapHash(project, undefined, sprint) : projectHash(project, undefined, sprint)) }
   return (
     <div className="pp today" data-project-page={project} data-view={view} data-sheet={shown ? '' : undefined} data-map-node={view === 'map' && node && project && model && find(model, node) ? '' : undefined}>
@@ -347,16 +358,23 @@ export default function ProjectPage({ project: wanted, route, view }: { project:
         </div>
       )}
       </div>
+      {tab === 'roadmap' && model?.meta && (
+        <div className="pp-sprint" data-pp-sprint-row>
+          <SprintPicker id="hub-project-sprint" sprints={sprints} value={sprint ?? ''} onChange={pickSprint} className="cb-bar pp-sprint-pick" />
+          {sprint && sprintRow && <span className="pp-sprint-count" data-pp-sprint-count>{sprintCount(sprintRow)}</span>}
+          {sprint && <a className="pp-link" href={workBoardHash(project, sprint)} data-pp-sprint-board>Open on the board ›</a>}
+        </div>
+      )}
       {mapShown
         ? (
-          <ProgressMap key={project} project={project} name={name} nodeId={node} model={model} error={error} loading={loading} at={modelAt} />
+          <ProgressMap key={project} project={project} name={name} nodeId={node} model={scoped ?? model} panelModel={scoped ? model ?? undefined : undefined} error={error} loading={loading} at={modelAt} />
         )
         : (
           <div className="pp-body" data-tab={tab}>
             <div className="pp-main" role="tabpanel" aria-label={TAB_LABEL[tab]}>
-              {tab === 'roadmap' && <NowBlock project={project} model={model} runsOn={item?.runsOn} onOpen={openNode} />}
-              {tab === 'roadmap' && <RoadmapTab project={project} model={model} error={error} loading={loading} at={modelAt} onOpen={openNode} />}
-              {tab === 'work' && <WorkTab project={project} name={name} today={today} />}
+              {tab === 'roadmap' && <NowBlock project={project} model={scoped ?? model} runsOn={item?.runsOn} onOpen={openNode} />}
+              {tab === 'roadmap' && <RoadmapTab project={project} model={model} sprint={scoped} error={error} loading={loading} at={modelAt} onOpen={openNode} />}
+              {tab === 'work' && <WorkTab project={project} name={name} today={today} sprint={sprint ? { name: sprint, label: sprintRow?.title ?? sprint } : undefined} />}
               {tab === 'cards' && <CardsTab project={project} />}
             </div>
           </div>
