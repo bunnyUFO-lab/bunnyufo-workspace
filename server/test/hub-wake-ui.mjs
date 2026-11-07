@@ -68,7 +68,7 @@ try {
   await view.goto(`${drawerFixture.url}#/~hub/needs`);
   const card = view.locator(`[data-need="approval-${PC_REQUEST}"]`);
   await card.waitFor();
-  // The PC's last report is 40 minutes old, so the Hub does not promise a start (ws-3o5).
+  // The PC's last report is 20 minutes old, so the Hub does not promise a start (ws-3o5).
   assert.match(await card.locator('[data-approval-starts]').innerText(), /asleep or off/);
   assert.doesNotMatch(await card.innerText(), /dispatcher|5 minutes/);
   await card.locator('[data-approval-approve]').click();
