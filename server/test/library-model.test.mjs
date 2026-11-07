@@ -16,7 +16,7 @@ const cards = [
   card('c', two, { updated: day(2) }),
   card('p', two, { pinned: true, pinOrder: 1 }),
   card('q', one, { pinned: true, pinOrder: 0 }),
-  card('old', one, { updated: day(10), created: day(10) }),
+  card('old', one, { updated: day(10), created: day(10), purpose: 'report' }),
   card('gone', two, { status: 'archived' }),
 ];
 
@@ -42,8 +42,9 @@ test('a search is one newest-first run, over title, description, category, id an
   assert.equal(matchesQuery(cards[1], 'nothing'), false);
 });
 
-test('the archive is the date rule and the explicit status; a pin keeps a card live', () => {
+test('the archive is the explicit status and the date of a report or done card; a pin keeps a card live', () => {
   assert.equal(isArchived(cards[5]), true);
+  assert.equal(isArchived(card('u', one, { updated: day(30), created: day(30) })), false, 'No purpose and active: it stays.');
   assert.equal(isArchived(card('x', one, { pinned: true, updated: day(30), created: day(30) })), false);
   assert.equal(isArchived(cards[6]), true);
   const list = libraryList(cards, order, { query: '', projects: [], view: 'archive' });

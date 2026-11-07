@@ -1,6 +1,6 @@
 // What the Library shows, as plain functions: no React, no window. The filter, the sort and the grouping that used to sit in App.tsx.
 import type { CardWorkspace, WorkspaceCard } from '../types'
-import { archiveCutoff } from '../lib/archiveRule.ts'
+import { isArchivedCard } from '../lib/archiveRule.ts'
 import { applyOrder, cardKey, type Order } from '../lib/orderKeys.ts'
 
 export type LibraryView = 'all' | 'pinned' | 'archive' | 'trash'
@@ -12,11 +12,10 @@ export const PAGE = 60
 export const lastTouched = (e: WorkspaceCard) => e.updated ?? e.created
 
 /**
- * An explicit `archived` status always wins, so a card can be put away by hand while it is still inside the 7-day window.
- * Otherwise it is the date rule, which `pinned` overrides in the other direction.
+ * The one rule (site/api/card-liveness.mjs): archived by hand always wins; otherwise only a report or a done card
+ * goes by date, and pinned, sample and reference cards stay.
  */
-export const isArchived = (e: WorkspaceCard) =>
-  e.status === 'archived' || (!e.pinned && !e.sample && lastTouched(e) < archiveCutoff())
+export const isArchived = (e: WorkspaceCard) => isArchivedCard(e)
 
 const statusRank = (e: WorkspaceCard) => (e.status === 'active' ? 0 : 1)
 export const byFreshness = (a: WorkspaceCard, b: WorkspaceCard) =>

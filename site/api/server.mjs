@@ -11,7 +11,7 @@
 //
 // It answers the same paths and shapes as the local service, so the UI calls one or the other
 // without knowing which: /api/card-state, /api/workspace/status, /api/workspace/pin,
-// /api/workspace/pins, /api/workspace/tags, /api/workspace/icon. /api/sections starts a new section: one
+// /api/workspace/pins, /api/workspace/tags, /api/workspace/icon, /api/workspace/purpose. /api/sections starts a new section: one
 // workspace.json plus the template files, put into the bucket, and it is on the site at once.
 // /api/cards… makes cards, adds Markdown sections to them and saves their text (card-writes.mjs).
 //
@@ -27,7 +27,7 @@ import path from 'node:path';
 import { createBucketCardStore, createCardStore, validEmoji } from './card-state.mjs';
 import { bucketStore, cardRoute, cardWriter } from './card-writes.mjs';
 import { contentTypeOf } from './s3.mjs';
-import { isLiveCard } from './card-liveness.mjs';
+import { isLiveCard, PURPOSES } from './card-liveness.mjs';
 
 const STATUSES = ['active', 'archived'];
 const RESERVED = new Set(['_app', '_retired', '_index', 'site', 'api', 'w', 'template', 'sections', 'state', 'today', 'inbox', 'board', 'map', 'chat', 'hub', 'inbox-dev']);
@@ -465,6 +465,14 @@ export function createSiteApi({
         return json(response, 200, { id: data.id, emoji: state.emoji ?? null });
       }
 
+      if (route === '/workspace/purpose') {
+        if (!PURPOSES.includes(data.purpose)) throw new Error('A card is a report or a reference.');
+        const section = await findSection(data.workspace);
+        findEntity(await sectionStored(section), data.id);
+        const state = await cards.setPurpose(section.id, data.id, data.purpose);
+        return json(response, 200, { id: data.id, purpose: state.purpose });
+      }
+
       if (route === '/workspace/pins') {
         const list = Array.isArray(data.list) ? data.list : null;
         if (!list?.length) throw new Error('Say which cards are pinned, in order.');
@@ -520,7 +528,7 @@ export function createSiteApi({
               // Only a workspace with nothing active can be put away; the state overlay (pins, archived cards) counts.
               const overlay = await cards.all();
               const live = list.entities.filter(item => item && isLiveCard(item, overlay[`${section.id}/${item.id}`]));
-              if (live.length) throw Object.assign(new Error(`"${section.name}" still has ${live.length} active card${live.length === 1 ? '' : 's'}. Archive them first (cards untouched for a week count as archived already).`), { status: 409 });
+              if (live.length) throw Object.assign(new Error(`"${section.name}" still has ${live.length} active card${live.length === 1 ? '' : 's'}. Archive them first (reports and done cards count as archived 7 days after their last change).`), { status: 409 });
               list.archived = true;
             } else {
               delete list.archived;
