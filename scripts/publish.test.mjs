@@ -595,6 +595,28 @@ test('a site change to the card list during a publish is merged in, not overwrit
   } finally { await fake.close(); }
 });
 
+test('a purpose added on the site comes down into a folder that did not change the card, and a local edit beside it stays', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, entry, bucketOptions } = await withCards(fake);
+    const { client, prefix } = bucketFor(entry, { env: {}, ...bucketOptions });
+    const remote = fake.json(LIST);
+    remote.entities.find(item => item.id === 'a').purpose = 'report';
+    remote.entities.find(item => item.id === 'b').purpose = 'reference';
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+    // Here, meanwhile: card b's title changed. Card a is untouched since the last sync.
+    const local = await localList(site);
+    local.entities.find(item => item.id === 'b').title = 'B, edited here';
+    await putLocal(site, local);
+    const merge = await mergeCardList({ root: site, bucket: client, prefix });
+    assert.equal(merge.merged, true);
+    const merged = await localList(site);
+    assert.equal(merged.entities.find(item => item.id === 'a').purpose, 'report', 'untouched here: the site’s field comes in');
+    const b = merged.entities.find(item => item.id === 'b');
+    assert.deepEqual([b.purpose, b.title], ['reference', 'B, edited here'], 'edited here: the field still merges in, the edit stays');
+  } finally { await fake.close(); }
+});
+
 test('a new local card that reuses a retired id stops the whole publish before anything is written', async () => {
   const fake = await startFakeS3();
   try {
