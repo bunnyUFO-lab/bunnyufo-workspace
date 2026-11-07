@@ -357,7 +357,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
 
   /** `GET /hub/requests/:id`. `approved` comes without its signed brief (`run.brief`): it is long and the run view does not show it. */
   async function requestDetail(id, at) {
-    const { names, request, parts, state } = await loadOne(id, at);
+    const loaded = await loadOne(id, at);
+    const { names, parts, state } = loaded;
+    const request = await withSiteReference(loaded.request);
     const read = file => (names.has(file) ? cached(`requests/${id}/${file}`) : null);
     const [stop, declined, hermesRun, retry, claim, runs, fires] = await Promise.all([
       read('stop.json'), read('declined.json'), read('hermes-run.json'), read('hermes-retry.json'), read('continued.json'),
@@ -495,7 +497,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const { request } = await loadOne(query.get('request') ?? '', at);
       const preset = presetOf(request.preset);
       if (!preset || request.target !== 'at-pc') throw fail('Only a request you start at the PC has a brief to copy.', 400);
-      return { brief: renderBrief({ preset, request: { ...request, reference: storedReference(request.reference) ?? undefined }, cardSection: await cardSectionOf(request.project) }) };
+      return { brief: renderBrief({ preset, request: await withSiteReference(request), cardSection: await cardSectionOf(request.project), target: request.target }) };
     }
     throw fail('Not found', 404);
   }
@@ -630,7 +632,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       requestSha256: sha256Hex(stored.buffer), limits: { minutes: sprint ? sprint.minutes : minutesOf(preset) },
       expires: sprint ? sprint.expires : new Date(at.getTime() + 72 * 3600 * 1000).toISOString(), nonce: newNonce(), at: at.toISOString(), by: sprint ? sprint.by : by,
       run: {
-        ...runBlock({ preset, request: repo && !request.repo ? { ...request, repo } : request, earlier, cardSection: await cardSectionOf(request.project), ...(sprint ? { minutes: sprint.minutes } : {}) }),
+        ...runBlock({ preset, request: repo && !request.repo ? { ...request, repo } : request, earlier, cardSection: await cardSectionOf(request.project), target: chosen, ...(sprint ? { minutes: sprint.minutes } : {}) }),
         ...(sprint ? { sprint: { head: sprint.head, seq: sprint.seq, of: sprint.of, until: sprint.until, after: sprint.after } } : {}),
       },
     };
@@ -782,6 +784,17 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const after = await loadOne(id, at);
     if (after.parts.approved?.target === 'hermes') { try { await live.stopRun(id); } catch { /* the stop is written; the follower sees it */ } }
     return { status: 201, body: { state: after.state, was } };
+  }
+
+  /**
+   * A stored request as a page or a brief may see it: its `reference` is kept only when the site wrote the file and the block has the shape
+   * the server writes, and removed otherwise. A request an agent filed can carry any block; it is never shown or briefed as the owner's.
+   */
+  async function withSiteReference(request) {
+    const { reference, ...rest } = request;
+    if (reference === undefined || reference === null) return rest;
+    const block = storedReference(reference);
+    return block && await siteWrote(request.id) ? { ...rest, reference: block } : rest;
   }
 
   /**
@@ -961,7 +974,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     await refuseUnapprovable(clean, preset, 'hermes');
     const newId = newRequestId(clean.project, clean.text, at);
     // Render the brief now, with the report cut as designed: one that cannot fit 16 KB even with no report would lock the original for good.
-    try { renderBrief({ preset, request: { ...clean, id: newId, ...(attached ? { reference: attached.block } : {}) }, earlier: await readEarlier(id) }); } catch (error) {
+    try { renderBrief({ preset, request: { ...clean, id: newId, ...(attached ? { reference: attached.block } : {}) }, earlier: await readEarlier(id), target: 'hermes' }); } catch (error) {
       if (error.status === 400) throw fail('That reply is too long to send with the job text; shorten the reply.', 400);
       throw error;
     }

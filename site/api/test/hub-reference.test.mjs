@@ -39,9 +39,13 @@ async function fixture() {
     const answer = await fetch(`${origin}/api${route}`, { method: 'POST', headers: { Origin: SITE, 'Content-Type': 'application/json', 'Remote-User': 'owner' }, body: JSON.stringify(data ?? {}) });
     return { status: answer.status, body: await answer.json().catch(() => null) };
   };
+  const get = async route => {
+    const answer = await fetch(`${origin}/api${route}`, { headers: { 'Remote-User': 'owner' } });
+    return { status: answer.status, body: await answer.json().catch(() => null) };
+  };
   const seed = seeder(fake);
   const keysOf = id => [...fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/requests/${id}/`)).map(key => key.split('/').pop());
-  return { fake, post, seed, keysOf, close: async () => { server.close(); await hub.close(); await fake.close(); } };
+  return { fake, post, get, seed, keysOf, close: async () => { server.close(); await hub.close(); await fake.close(); } };
 }
 
 const job = (extra = {}) => ({ project: 'probe', text: 'Compare these two takes', preset: 'research', target: 'hermes', reference: reference(), ...extra });
@@ -184,4 +188,40 @@ test('the stored block is read only in the shape the server writes', () => {
   }
   const refused = checkReference({ type: 'image/png', data: PNG.toString('base64'), source: source() }, message => new Error(message));
   assert.equal(refused.block.sha256, sha(refused.picture.buffer));
+});
+
+test('a planted reference is neither shown nor briefed: the page and the PC brief read it only from a request the site wrote', async () => {
+  const { fake, get, seed, close } = await fixture();
+  try {
+    const block = { file: 'reference.png', sha256: sha(PNG), width: 40, height: 30, source: source({ title: 'Planted by an agent' }) };
+    for (const [slug, writer] of [['unset', undefined], ['agent', 'agent']]) {
+      const planted = { ...requestJson({ id: `${day}-probe-plant-${slug}-a1b2`, now: NOW }), project: 'probe', preset: 'research', target: 'at-pc', origin: { kind: 'agent', name: 'a-run' }, reference: block };
+      seed.request(planted, writer ? { writer } : {});
+      fake.seed(`sections/inbox/requests/${planted.id}/reference.png`, PNG, 'image/png');
+      const detail = await get(`/hub/requests/${planted.id}`);
+      assert.equal(detail.status, 200, JSON.stringify(detail.body));
+      assert.equal(detail.body.request.reference, undefined, `The page is not given a block an agent wrote (${slug}).`);
+      const brief = await get(`/hub/presets/brief?request=${planted.id}`);
+      assert.equal(brief.status, 200, JSON.stringify(brief.body));
+      assert.ok(!/Reference picture/.test(brief.body.brief), `The at-PC brief has no line for it (${slug}).`);
+    }
+    // A block with no source, or with a file that is not reference.png, is dropped too.
+    const odd = { ...requestJson({ id: `${day}-probe-plant-odd-a1b2`, now: NOW }), project: 'probe', preset: 'research', target: 'at-pc', origin: { kind: 'agent', name: 'a-run' }, reference: {} };
+    seed.request(odd);
+    assert.equal((await get(`/hub/requests/${odd.id}`)).body.request.reference, undefined);
+  } finally { await close(); }
+});
+
+test('a request the site wrote keeps its reference on the page, and its at-PC brief names the PC tool', async () => {
+  const { post, get, close } = await fixture();
+  try {
+    const made = await post('/hub/requests', job({ target: 'at-pc' }));
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    const detail = await get(`/hub/requests/${made.body.id}`);
+    assert.equal(detail.body.request.reference.file, 'reference.png');
+    const brief = (await get(`/hub/presets/brief?request=${made.body.id}`)).body.brief;
+    assert.match(brief, /Get it by running `node \.claude\/bin\/run-reference\.mjs` \(no arguments/);
+    assert.ok(!/cards request reference/.test(brief));
+    assert.match(brief, /If that command is missing, it came from `img\/photo\.png`/);
+  } finally { await close(); }
 });
