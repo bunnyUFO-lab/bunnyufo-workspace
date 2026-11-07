@@ -135,18 +135,21 @@ test('GET /hub/schedules reads the PC status and the file beside the env file, a
   }
 });
 
-test('a guest reads no task, folder, repo or workflow name: /hub/pc drops the field, /hub/schedules needs sign-in', async () => {
+test('a guest reads nothing of the PC or its tasks; a signed-in caller gets /hub/pc without the schedules field', async () => {
   const f = await fixture({ file: hostText() });
   try {
     seedPcStatus(f.fake, pcStatusJson({ now: NOW, minutesOld: 1, extra: { schedules: pcSchedules({ now: NOW }) } }));
     const guest = await f.raw('/hub/pc');
-    assert.equal(guest.status, 200);
-    const text = await guest.text();
+    assert.equal(guest.status, 401);
+    assert.deepEqual(Object.keys(await guest.json()), ['error']);
+    const signedPc = await f.raw('/hub/pc', { 'Remote-User': 'owner' });
+    assert.equal(signedPc.status, 200);
+    const text = await signedPc.text();
     const body = JSON.parse(text);
     assert.equal(body.pc.state, 'on');
     assert.ok(body.status && body.status.host && Array.isArray(body.status.sessions), 'the rest of the status is still sent');
     assert.ok(!('schedules' in body.status));
-    for (const word of ['Sample Report', 'Example Updater', 'example-org', 'ci.yml', 'tasksAt', 'ours']) assert.ok(!text.includes(word), );
+    for (const word of ['Sample Report', 'Example Updater', 'example-org', 'ci.yml', 'tasksAt', 'ours']) assert.ok(!text.includes(word), `/hub/pc holds ${word}`);
     assert.equal((await f.raw('/hub/schedules')).status, 401);
     const signed = await (await f.raw('/hub/schedules', { 'Remote-User': 'owner' })).json();
     assert.deepEqual(signed.sources.map(source => [source.id, source.state, source.items.length]), [['hermes-jobs', 'not-reporting', 0], ['hermes-timers', 'not-reporting', 0], ['site-timers', 'live', 3], ['pc-tasks', 'live', 4], ['github', 'live', 2]]);

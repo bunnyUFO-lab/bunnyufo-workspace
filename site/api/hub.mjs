@@ -58,7 +58,7 @@ import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES,
 import { presetOf } from './presets.mjs';
 import { jobRow, verifyJob } from './chat-jobs.mjs';
 import { createdIds, deliverablesOf, jobsList } from './job-deliverables.mjs';
-import { isActive, pcSummary, publicStatus, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
+import { isActive, pageStatus, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { pcStartVerdict, pcWaitOf } from './hub-pc-wait.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
@@ -2058,8 +2058,9 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             if (!validProject(project)) throw fail('Give a project id.', 400);
             reply({ pcWait: await pcVerdict({ project, opensWindows: query.get('opensWindows') === '1', at }) });
           } else if (route === '/hub/pc') {
+            if (requireRemoteUser && !user) throw fail('Sign in to see the PC.', 401);
             const status = await loadPcStatus(at);
-            reply({ pc: status ? pcSummary(status, at) : null, status: publicStatus(status), wake: await wake.view(status, at) });
+            reply({ pc: status ? pcSummary(status, at) : null, status: pageStatus(status), wake: await wake.view(status, at) });
           } else if (route === '/hub/presence') {
             reply(await presence.view(at));
           } else if (route === '/hub/inbox') {

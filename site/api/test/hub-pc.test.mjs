@@ -7,12 +7,12 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { beadOfBranch, cleanHogs, isActive, pcSummary, validStatus, workingNow } from '../hub-pc.mjs';
+import { beadOfBranch, cleanHogs, isActive, PAGE_STATUS_FIELDS, pageStatus, pcSummary, validStatus, workingNow } from '../hub-pc.mjs';
 import { buildToday } from '../hub-model.mjs';
 import { todayFor } from '../../../src/hub/todayFilter.ts';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
-import { eventJson, minutesAgo, pcStatusJson, seedPcStatus, seeder } from './hub-fixtures.mjs';
+import { eventJson, minutesAgo, pcSchedules, pcStatusJson, seedPcStatus, seeder } from './hub-fixtures.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const NOW = new Date();
@@ -27,8 +27,10 @@ async function fixture({ inbox = 'inbox' } = {}) {
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const get = async route => { const answer = await fetch(`${origin}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
-  return { fake, get, seed: seeder(fake, `sections/${inbox}`), prefix: `sections/${inbox}`, close: async () => { server.close(); await fake.close(); } };
+  const request = async (route, headers) => { const answer = await fetch(`${origin}/api${route}`, { headers }); return { status: answer.status, body: await answer.json().catch(() => null) }; };
+  const get = route => request(route, { 'Remote-User': 'owner' });
+  const guest = route => request(route, {});
+  return { fake, get, guest, seed: seeder(fake, `sections/${inbox}`), prefix: `sections/${inbox}`, close: async () => { server.close(); await fake.close(); } };
 }
 
 test('beadOfBranch finds the Beads id after the prefix', () => {
@@ -233,6 +235,36 @@ test('GET /hub/pc and /hub/today read the newest status file', async () => {
     assert.equal(pc.status.sessions.length, 2, 'The newest file is read, not the older one.');
     assert.ok(newest.startsWith('pc/status-'));
   } finally { await close(); }
+});
+
+test('a guest gets 401 and nothing of the PC from /hub/pc; a signed-in caller gets the listed fields', async () => {
+  const { fake, get, guest, close } = await fixture();
+  try {
+    seedPcStatus(fake, pcStatusJson({ now: NOW, minutesOld: 1, extra: { schedules: pcSchedules({ now: NOW }), runner: { projects: ['probe'], launch: true, busy: [], full: null } } }));
+    const refused = await guest('/hub/pc');
+    assert.equal(refused.status, 401);
+    assert.deepEqual(Object.keys(refused.body), ['error']);
+    const text = JSON.stringify(refused.body);
+    for (const word of ['Wall-jump tutorial', 'probe-work', 'probe', 'sprint/ml-wj-t2-wall-jump', 'test-pc', 'Sample Report']) assert.ok(!text.includes(word), `the guest answer holds ${word}`);
+    const signed = await get('/hub/pc');
+    assert.equal(signed.status, 200);
+    assert.equal(signed.body.pc.state, 'on');
+    assert.deepEqual(Object.keys(signed.body.status).sort(), [...PAGE_STATUS_FIELDS].sort());
+    assert.equal(signed.body.status.sessions.length, 2);
+    assert.ok(!('schedules' in signed.body.status));
+  } finally { await close(); }
+});
+
+test('every key validStatus can return is listed for the page or named as not for it, so a new key waits for a decision', () => {
+  const NOT_FOR_THE_PAGE = ['schedules'];
+  const full = validStatus(pcStatusJson({ now: NOW, extra: { schedules: pcSchedules({ now: NOW }), runner: { projects: ['probe'], launch: true, busy: [], full: null } } }));
+  for (const key of Object.keys(full)) assert.ok(PAGE_STATUS_FIELDS.includes(key) || NOT_FOR_THE_PAGE.includes(key), `${key} is neither listed nor named as not for the page`);
+  assert.deepEqual(Object.keys(pageStatus(full)).sort(), [...PAGE_STATUS_FIELDS].sort());
+});
+
+test('pageStatus copies only the listed keys and passes null through', () => {
+  assert.equal(pageStatus(null), null);
+  assert.deepEqual(pageStatus({ host: 'test-pc', brandNew: 'x', schedules: { a: 1 }, sessions: [] }), { host: 'test-pc', sessions: [] });
 });
 
 test('a stale or a bad status gives no live PC; the dev inbox is its own folder', async () => {
