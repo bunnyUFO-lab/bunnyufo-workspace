@@ -928,6 +928,8 @@ Both services answer the same routes (`site/api/card-writes.mjs`): `POST /api/ca
 `/api/cards/update`, `/api/cards/section`, `/api/cards/section/rename`, `/api/cards/markdown`,
 and `GET /api/cards/markdown`.
 
+The four card reads (`GET /api/cards/markdown`, `/cards/drawing`, `/cards/responses`, `/cards/move/progress`) follow the rule the writes follow: with `REQUIRE_REMOTE_USER=1` a read with no `Remote-User` is 401 (`Sign in to read this.`) before any stored file is read. Library files under `/w/` stay open.
+
 ## Cards from anywhere
 
 A session without a workspace folder — a cloud agent, a new laptop — can still read and publish
