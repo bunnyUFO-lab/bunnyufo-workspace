@@ -16,6 +16,8 @@ import Combobox from './Combobox'
 import type { ComboOption } from './comboboxLogic'
 import type { SpawnOptions } from './spawnStore'
 import './runs.css'
+import type { PcWait } from '../lib/hubPc'
+import { usePcStart } from './usePcStart'
 
 const ICONS: Record<string, string> = {
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/>',
@@ -50,7 +52,7 @@ const policyLine = (kinds: string[]) => {
 const AUTO = 'auto'
 const HERMES = 'hermes'
 
-const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within a few minutes.' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
+const startsNote = (target: SpawnTarget, pc: PcWait | null = null) => (target === 'pc' && pc?.state === 'blocked' && pc.short ? pc.short : target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within a few minutes.' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
 
 /** The Spawn sheet: pick a job, see where it runs and why, then send it. A dialog on a desktop, a bottom sheet on a phone. */
 /** What the toast says after Spawn, and where the new run or item is: `run` is a started request, `needs` a request that waits in Needs you. */
@@ -184,6 +186,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const picked = models.find(entry => entry.id === model) ?? models[0]
   const sendModel = target === 'hermes' && picked && picked.id !== AUTO ? picked.id : undefined
   const canApprove = host.approve && !atPc
+  // A job for the PC says so when the Hub knows the PC cannot start it, instead of promising a start.
+  const pcStart = usePcStart(project, target === 'pc')
   const trimmed = text.trim()
   const ready = chatting || (!!preset && !!project && !!trimmed && repoValid && !!target && !busy)
   // Why the button is off, first thing first.
@@ -383,7 +387,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         <span className="sp-go">
           <button type="button" className="hub-btn pri" disabled={!ready} aria-busy={busy} onClick={() => void send()} data-spawn-go>{button}</button>
           <span className="sp-note" data-spawn-note>
-            {chatting ? `Opens a new chat with ${chatAgentName}. Nothing is filed.` : missing ? missing : atPc ? 'You start it at the PC. Copy its prompt from the item in Needs you.' : canApprove && target ? startsNote(target) : host.approveReason ?? 'Waits in Needs you until it is approved.'}
+            {chatting ? `Opens a new chat with ${chatAgentName}. Nothing is filed.` : missing ? missing : atPc ? 'You start it at the PC. Copy its prompt from the item in Needs you.' : canApprove && target ? startsNote(target, pcStart) : host.approveReason ?? 'Waits in Needs you until it is approved.'}
           </span>
         </span>
       </div>

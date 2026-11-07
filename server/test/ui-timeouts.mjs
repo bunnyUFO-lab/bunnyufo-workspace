@@ -87,10 +87,15 @@ const watchPage = page => {
 };
 // What a page is still waiting for, kept so a wait that times out can say so: the requests in flight, the address and the text on screen.
 const inFlight = new WeakMap();
+const answered = new WeakMap();
 const trackRequests = page => {
   const open = new Map();
   inFlight.set(page, open);
   page.on('request', request => { open.set(request, Date.now()); });
+  // The browser reports a request finished only when the page has read its whole body. The app does not read the body of an
+  // error answer (the local service answers /sites.json with a 400), so that request stays listed here for the life of the page
+  // although it was answered in milliseconds. The dump says "answered" so it is not taken for a hung request.
+  page.on('response', response => { answered.set(response.request(), response.status()); });
   const done = request => { open.delete(request); };
   page.on('requestfinished', done);
   page.on('requestfailed', done);
@@ -101,7 +106,7 @@ async function explainTimeout(page) {
   if (explained.has(page)) return;
   explained.add(page);
   try {
-    const open = [...(inFlight.get(page) ?? [])].map(([request, since]) => `${request.method()} ${request.url().replace(/^(https?:\/\/[^/]+)/, (host) => host.replace(/:\d+$/, ':port')).slice(0, 140)} (${Date.now() - since} ms)`);
+    const open = [...(inFlight.get(page) ?? [])].map(([request, since]) => `${request.method()} ${request.url().replace(/^(https?:\/\/[^/]+)/, (host) => host.replace(/:\d+$/, ':port')).slice(0, 140)} (${Date.now() - since} ms${answered.has(request) ? `, answered ${answered.get(request)} but its body was not read` : ''})`);
     const text = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '(the page could not be read)');
     console.log(`(pending) address: ${page.url().replace(/:\d+\//, ':port/').slice(0, 200)}`);
     console.log(`(pending) ${open.length} request${open.length === 1 ? '' : 's'} in flight${open.length ? ':' : ''}`);

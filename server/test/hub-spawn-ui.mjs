@@ -27,6 +27,13 @@ const noSideways = async (page, what) => {
   assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
   assert.ok(widths.sheet <= widths.sheetInner, `${what}: the sheet scrolls sideways (${widths.sheet} > ${widths.sheetInner}).`);
 };
+// A sheet closes with history.back(), which the browser runs a moment after the sheet has left the page. A test that goes on to
+// change the address at once can have that traversal land after its change and undo it (the CI failure was the address back on
+// #/~hub/needs/~o), so Escape is followed by a wait for the sheet's own address entry to be gone.
+const closeSheet = async target => {
+  await target.keyboard.press('Escape');
+  await target.waitForFunction(() => !/\/~o$/.test(location.hash));
+};
 const requestsIn = fixture => [...fixture.fake.objects.keys()].filter(key => /sections\/inbox\/requests\/[^/]+\/request\.json$/.test(key));
 
 try {
@@ -123,7 +130,7 @@ try {
   await page.evaluate(() => { location.hash = '#/~hub/needs'; });
   await page.locator('.needs-actions [data-spawn-open]').click();
   await page.locator('[data-spawn-sheet]').waitFor();
-  await page.keyboard.press('Escape');
+  await closeSheet(page);
   await page.locator('[data-spawn-sheet]').waitFor({ state: 'detached' });
 
   step('Ctrl+K: "spawn <text>" lists the command first; Enter opens the sheet with the text and the guessed preset');
@@ -135,7 +142,7 @@ try {
   await page.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await page.locator('[data-spawn-text]').inputValue(), 'teardown of how balatro teaches its rules');
   assert.equal(await page.locator('[data-preset="game-teardown"]').getAttribute('aria-pressed'), 'true');
-  await page.keyboard.press('Escape');
+  await closeSheet(page);
 
   step('Ctrl+K from a card page goes to the Hub and opens the sheet there');
   await page.evaluate(() => { location.hash = '#/hub'; });
@@ -147,7 +154,7 @@ try {
   // The sheet's entry is added a moment after the sheet draws, and page.url() is the browser's last reported address: wait for it.
   await page.waitForURL(/#\/~hub\/today\/~o$/);
   assert.equal(await page.evaluate(() => location.hash), '#/~hub/today/~o', 'The Hub is Today, and the open sheet is its own history entry.');
-  await page.keyboard.press('Escape');
+  await closeSheet(page);
 
   step('Approve: with the capability on the button reads Approve and each target has its toast, and a wait says why');
   const signed = await open({ width: 1280, height: 900 });
@@ -165,7 +172,7 @@ try {
   await signed.locator('[data-spawn-open]').click();
   await signed.locator('[data-spawn-policy]').waitFor();
   assert.equal(await signed.locator('[data-spawn-policy]').innerText(), 'Research and docs may be signed by policy.');
-  await signed.keyboard.press('Escape');
+  await closeSheet(signed);
   assert.equal(await page.locator('[data-spawn-policy]').count(), 0, 'Without a policy the line is absent.');
   const approve = async (preset, text, toast, target, machine = 'Hermes') => {
     await signed.locator('[data-spawn-open]').click();

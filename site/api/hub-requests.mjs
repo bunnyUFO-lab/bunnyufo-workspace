@@ -204,7 +204,7 @@ export function rerunRequestId(requestId) {
 export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, bunnylinkRepo = async () => null, cardSectionOf = async () => 'assistant', repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', cloudNever = [], neverRepos = [], log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
-  const live = { wakeOnApprove: async () => false, hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, steer: async () => ({ delivery: 'queued', reason: 'Hermes is not set up on this host.' }), retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
+  const live = { wakeOnApprove: async () => false, hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, steer: async () => ({ delivery: 'queued', reason: 'Hermes is not set up on this host.' }), retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, pcVerdict: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
   const clash = message => fail(message, 409);
   /** Bunnylink work (the homelab) is never signed for the PC or the cloud: the owner starts it at the PC. */
   const BUNNYLINK_AT_PC = 'Bunnylink work is started by you at the PC.';
@@ -252,7 +252,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
   /** Why a request naming `repo` may not be signed for the PC or the cloud: `{ status, message }`, or null. */
   const neverProblem = (never, repo) => (!repo ? null : never.set.has(normRepo(repo)) ? { status: 400, message: NEVER_REPO } : never.unknown);
-  function moveEligibility(request, state, approved, at, stored = null, never = { set: new Set(), unknown: null }, repo = request.repo) {
+  function moveEligibility(request, state, approved, at, stored = null, never = { set: new Set(), unknown: null }, repo = request.repo, early = false) {
     const preset = presetOf(request.preset);
     if (!preset) return 'Only a request made from a preset can move.';
     if (state !== 'approved') return `That request is ${state}; it cannot move to the cloud.`;
@@ -262,7 +262,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!publicKey || !verify(approved, publicKey)) return 'The approval on that request failed the server\'s check.';
     if (approved.request !== request.id || !(Date.parse(approved.expires) > at.getTime())) return 'The approval on that request failed the server\'s check.';
     if (stored && approved.requestSha256 !== sha256Hex(stored.buffer)) return 'The approval on that request failed the server\'s check.';
-    if (at.getTime() - Date.parse(approved.at) < MOVE_AFTER_MS) return 'It has not waited 6 hours yet.';
+    // `early`: the Hub knows the PC cannot start this job (a stuck job, ws-3o5), so it need not wait the 6 hours.
+    if (!early && at.getTime() - Date.parse(approved.at) < MOVE_AFTER_MS) return 'It has not waited 6 hours yet.';
     if (!preset.targets.includes('cloud')) return `${preset.label} cannot run in the cloud.`;
     if (preset.needs.length || (request.needs ?? []).length) return 'It needs something only the PC has.';
     if (!repo) return 'A cloud run needs a repo.';
@@ -313,7 +314,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const lookup = !full.repo && state === 'approved' && parts.approved?.target === 'pc';
       const offer = moveEligibility(full, state, parts.approved, at, null, never, full.repo || (lookup ? await projectRepo(full.project).catch(() => undefined) : undefined)) === null ? 'move-to-cloud' : null;
       // (The list pass skips the request hash; the route checks it.)
-      return requestItem(full, state, parts.taken, { ...parts, cloud, offer, lastRunAt: newestRun(names, at), now: at });
+      // An approved PC job: what the PC status needs to judge it (hub.mjs adds `pcWait`), and whether the cloud could take it instead.
+      const pcJob = state === 'approved' && parts.approved?.target === 'pc'
+        ? { approvedAt: parts.approved.at, opensWindows: parts.approved.run?.opensWindows === true,
+          cloudOk: moveEligibility(full, state, parts.approved, at, null, never, full.repo || (lookup ? await projectRepo(full.project).catch(() => undefined) : undefined), true) === null }
+        : null;
+      return requestItem(full, state, parts.taken, { ...parts, cloud, offer, pcJob, lastRunAt: newestRun(names, at), now: at });
     });
     return rows.filter(Boolean);
   }
@@ -634,8 +640,15 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     let waiting;
     let cloud;
     let woke = false;
+    let pcWait = null;
     try {
-      if (chosen === 'pc') woke = (await live.wakeOnApprove({ by, at })) === true;
+      if (chosen === 'pc') {
+        woke = (await live.wakeOnApprove({ by, at })) === true;
+        // Warn now when no runner can take the job (ws-3o5); it stays approved and starts when the cause is gone.
+        pcWait = await live.pcVerdict({ project: request.project, approvedAt: null, opensWindows: approved.run?.opensWindows === true, at }).catch(() => null);
+        // A PC that was just asked to wake is not "silent": the wake note says it.
+        if (pcWait?.state === 'blocked' && !(woke && pcWait.cause === 'pc-silent')) waiting = pcWait.short;
+      }
       const handed = chosen === 'pc' ? null : await live.handOff[chosen](id, { at });
       if (handed?.waiting) waiting = handed.waiting;
       if (chosen === 'cloud' && handed) cloud = { fired: handed.fired === true, ...(handed.reason ? { reason: handed.reason } : {}), ...(handed.next ? { next: handed.next } : {}) };
@@ -644,7 +657,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       waiting = `Could not start yet: ${scrub(error.message, 80)}`;
     }
     const after = await loadOne(id, at).catch(() => null);
-    return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}), ...(cloud ? { cloud } : {}), ...(woke ? { wake: 'sent' } : {}) };
+    return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}), ...(pcWait ? { pcWait } : {}), ...(cloud ? { cloud } : {}), ...(woke ? { wake: 'sent' } : {}) };
   }
 
   /**
@@ -1130,7 +1143,10 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const { request, parts, state } = await loadOne(id, at);
       const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
       if (!stored) throw fail('No such request.', 404);
-      const why = moveEligibility(request, state, parts.approved, at, stored, await neverRepoSet(), request.repo || await projectRepo(request.project).catch(() => undefined));
+      // A job the Hub knows the PC cannot start (stuck: ws-3o5) may move before the 6 hours are up.
+      const stuck = state === 'approved' && parts.approved?.target === 'pc'
+        && (await live.pcVerdict({ project: request.project, approvedAt: parts.approved.at, opensWindows: parts.approved.run?.opensWindows === true, at }).catch(() => null))?.state === 'stuck';
+      const why = moveEligibility(request, state, parts.approved, at, stored, await neverRepoSet(), request.repo || await projectRepo(request.project).catch(() => undefined), stuck);
       if (why) throw clash(why);
       const newId = newRequestId(request.project, request.text, at);
       await writeStop(id, `moved to the cloud: ${newId}`, user, at, ['approved']);

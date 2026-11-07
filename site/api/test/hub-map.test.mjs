@@ -17,10 +17,26 @@ test('a milestone is found by type and by each label; its epics are features and
     issue({ id: 'a-f', type: 'epic', parent: 'a' }),
     issue({ id: 'a-f-t', parent: 'a-f' }),
     issue({ id: 'a-feat', type: 'feature', parent: 'a' }),
+    issue({ id: 'a-feat-t', parent: 'a-feat' }),
   ]);
   assert.deepEqual(map.milestones.map(item => item.id), ['a', 'b', 'c']);
   assert.deepEqual(map.milestones[0].features.map(item => item.id), ['a-f', 'a-feat']);
   assert.deepEqual(map.milestones[0].features[0].tasks.map(item => item.id), ['a-f-t']);
+});
+
+test('a feature with no children is a task with its sprint; an epic with none is still not', () => {
+  const map = build([
+    issue({ id: 'm', type: 'milestone', title: 'Alpha' }),
+    issue({ id: 'solo', type: 'feature', parent: 'm', labels: ['sprint:s1'] }),
+    issue({ id: 'empty-epic', type: 'epic', parent: 'm' }),
+    issue({ id: 'loose-solo', type: 'feature', labels: ['sprint:s1'] }),
+  ]);
+  assert.deepEqual(task(map, 'solo').sprints, ['s1'], 'The childless feature is a task and carries its sprint.');
+  assert.ok(task(map, 'loose-solo'), 'Outside every milestone it is a task too.');
+  assert.ok(map.milestones[0].features.every(feature => feature.id !== 'solo'), 'It is not a feature node.');
+  assert.ok(!tasksOf(map).some(item => item.id === 'empty-epic'));
+  assert.deepEqual(map.sprints.map(band => band.name), ['s1']);
+  assert.ok(map.sprints[0].milestones.length >= 1, 'The sprint band reaches its milestone.');
 });
 
 test('a label a child inherited from its milestone does not make it a milestone', () => {

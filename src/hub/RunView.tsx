@@ -4,10 +4,10 @@ import { HUB_WROTE, HubError, ago, clock, fileUrl, hubPost, safeUrl, sessionUrl 
 import type { Deliverable } from '../lib/hub'
 import { MACHINE } from '../lib/hubSpawn'
 import type { SpawnTarget } from '../lib/hubSpawn'
-import { hubHash, mapHash } from '../lib/route'
+import { hubHash, projectNodeHash } from '../lib/route'
 import { back } from '../lib/entries'
 import type { RequestDetail } from './ApprovalView'
-import Md from './Md'
+import Md, { CodeBlock } from './Md'
 import { setFocus } from './needsFocus'
 import ReferenceNote from './ReferenceNote'
 import RunReply from './RunReply'
@@ -16,6 +16,8 @@ import { applyRunEvent, elapsedLabel } from './runLines'
 import { streamRun } from './runStream'
 import { useHubData } from './useHub'
 import { usePcWake } from './usePcWake'
+import type { PcWait } from '../lib/hubPc'
+import { PcFix } from './PcStuckView'
 import { requestStateWord } from './working'
 import WakeButton from './WakeButton'
 import './runs.css'
@@ -37,6 +39,8 @@ interface RunDetail extends RequestDetail {
   deliverables?: Deliverable[]
   /** The preset's agent, as the job list shows it. */
   agent?: string
+  /** Whether the PC can start an approved PC job, from the PC's report; absent when the Hub has nothing to say. */
+  pcWait?: PcWait
   /** Where an approved cloud request stands, from the site API's fire queue. */
   cloud?: CloudState
   fires?: CloudFire[]
@@ -109,6 +113,26 @@ const LIVE_STATES = new Set(['approved', 'taken', 'running', 'stopping'])
 const RUN_WORD: Record<string, string> = { started: 'Started', working: 'Working', 'turn-ended': 'Turn ended', 'usage-limit': 'Usage limit' }
 
 const usageLine = (usage?: Record<string, unknown>) => Object.entries(usage ?? {}).filter(([, value]) => typeof value === 'number').slice(0, 4).map(([name, value]) => `${name.replace(/_/g, ' ')} ${(value as number).toLocaleString()}`).join(' · ')
+
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** What goes in the shell: a request id of letters, digits, dots, dashes and underscores only. */
+const SAFE_ID_RE = /^[\w.-]{1,120}$/
+
+/**
+ * A finished run on the Gaming PC can be carried on in a terminal there: the command takes the request's id, and the PC looks up
+ * the session and the folder itself, so no path is shown. The session id is shown only when the Hub has one (the PC gives it when
+ * it takes the request).
+ */
+function OpenAtPc({ id, session }: { id: string; session?: string }) {
+  return (
+    <div className="rd-openrun" data-run-open>
+      <h4 className="rd-h">Continue it at the PC</h4>
+      <p className="hub-muted">Paste this in a terminal on the PC that ran the job. It will not work from another computer, or while that project has a run going.</p>
+      <CodeBlock exact><code data-run-open-command>{`node $HOME/.config/pc-dispatch/dispatch.mjs open-run ${id}`}</code></CodeBlock>
+      {session && <p className="hub-muted">Session <span className="hub-id" data-run-open-session>{session}</span></p>}
+    </div>
+  )
+}
 
 /** The link to the card a run wrote: a site link as it is, `section/folder` as the card of that folder. */
 function cardLink(card: string, resolved?: string): string | undefined {
@@ -191,7 +215,7 @@ function DeliverableCard({ item }: { item: Deliverable }) {
       <div className="rd-dl" data-run-deliverable="task" data-task-id={item.id}>
         <b>{item.title ?? item.id}</b>
         <span className="hub-muted">Task · <span className="hub-id" data-run-task-id>{item.id}</span></span>
-        <div className="rd-links"><a className="hub-btn pri" href={mapHash(item.project, item.id)} data-run-task>Open</a></div>
+        <div className="rd-links"><a className="hub-btn pri" href={projectNodeHash(item.project, item.id)} data-run-task>Open</a></div>
       </div>
     )
   }
@@ -407,7 +431,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
           </p>
         )}
       </div>}
-      {request.bead && <p className="hub-muted rd-from" data-run-from-task>From task <a href={mapHash(request.project, request.bead)}>{request.bead}</a></p>}
+      {request.bead && <p className="hub-muted rd-from" data-run-from-task>From task <a href={projectNodeHash(request.project, request.bead)}>{request.bead}</a></p>}
     </>
   )
   return (
@@ -425,7 +449,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
       {movedId && <p className="rd-note" data-run-moved>Moved to the cloud → <a href={hubHash('request', movedId)}>{movedId}</a></p>}
       {!movedId && older && movedTo(older.stop?.reason) === id && <p className="rd-note" data-run-moved-from>Moved from the PC · <a href={hubHash('request', older.request.id)}>{older.request.id}</a></p>}
       {target && <p className="hub-muted" data-run-target>{runsOn(target)}{!page && request.doneWhen ? ` · done when: ${request.doneWhen}` : ''}</p>}
-      {state === 'approved' && target === 'pc' && <PcStart />}
+      {state === 'approved' && target === 'pc' && <PcStart wait={detail.pcWait} />}
       {cloudShown && (
         <div className="rd-cloud" data-run-cloud={cloud?.status} data-cloud-reason={cloud?.reason}>
           <p>{cloudShown.text}{dry && <span className="hub-muted" data-run-dry> (dev: nothing was sent)</span>}</p>
@@ -458,6 +482,9 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         </>
       )}
 
+      {taken?.runner === 'pc' && FINISHED.has(state) && SAFE_ID_RE.test(request.id) && (
+        <OpenAtPc id={request.id} session={SESSION_ID_RE.test(taken.session ?? '') ? taken.session : undefined} />
+      )}
       <RunReply id={id} state={state} target={target} approved={!!approved} hasRun={hasRun} continuedTo={detail.continued?.to} onGone={onGone} onSent={reload} />
       {delivered && didSomething && (
         <details className="rd-did" data-run-did>
@@ -491,12 +518,19 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   )
 }
 
-/** An approved PC request starts at the watcher's next tick, within a few minutes; when the PC reads as asleep or off, it can be woken from here. */
-function PcStart() {
+/**
+ * An approved PC request starts at the watcher's next tick, within a few minutes, unless the Hub knows better from the PC's report: then it
+ * says why it will not start (with the command to fix it), or what it is waiting for. When the PC reads as asleep or off, it can be woken from here.
+ */
+function PcStart({ wait }: { wait?: PcWait }) {
   const wake = usePcWake()
+  const blocked = wait?.state === 'blocked' || wait?.state === 'stuck'
   return (
     <div className="rd-pc" data-run-pc-start>
-      <p>Starts on the PC within a few minutes.</p>
+      {blocked && <p data-run-pc-blocked={wait.cause}>{wait.text}</p>}
+      {blocked && <PcFix wait={wait} />}
+      {wait?.state === 'wait' && <p data-run-pc-wait={wait.kind}>{wait.text}</p>}
+      {!blocked && wait?.state !== 'wait' && <p>Starts on the PC within a few minutes.</p>}
       <WakeButton wake={wake} />
     </div>
   )

@@ -43,8 +43,8 @@ test('route: the five rules, first match winning, and both fallbacks', () => {
     ['3 research is Hermes', { preset: 'market-research', project: 'magic-loops' }, 'hermes', 3],
     ['4 Magic Loops defaults to the PC', { preset: 'code-task', project: 'magic-loops', repo: 'example/a' }, 'pc', 4],
     ['4 Sprite Studio defaults to the PC', { preset: 'docs', project: 'sprite-studio', repo: 'example/a' }, 'pc', 4],
-    ['5 a repo means the cloud', { preset: 'code-task', project: 'workspace-app', repo: 'example/a', cloudRepos: ['example/a'] }, 'cloud', 5],
-    ['5 no repo means the PC', { preset: 'code-task', project: 'workspace-app' }, 'pc', 5],
+    ['5 a repo means the cloud', { preset: 'code-task', project: 'shadowdark', repo: 'example/a', cloudRepos: ['example/a'] }, 'cloud', 5],
+    ['5 no repo means the PC', { preset: 'code-task', project: 'shadowdark' }, 'pc', 5],
     ['5 an unknown project with a repo', { preset: 'docs', project: 'brand-new', repo: 'example/a', cloudRepos: ['example/a'] }, 'cloud', 5],
   ];
   for (const [name, input, target, rule] of cases) {
@@ -52,7 +52,7 @@ test('route: the five rules, first match winning, and both fallbacks', () => {
     assert.deepEqual([got.target, got.rule], [target, rule], name);
     assert.ok(got.why.length > 5, name);
   }
-  const fallback = route({ preset: 'code-task', project: 'workspace-app', repo: 'example/a' });
+  const fallback = route({ preset: 'code-task', project: 'shadowdark', repo: 'example/a' });
   assert.equal(fallback.target, 'pc');
   assert.match(fallback.why, /no cloud routine for example\/a yet/);
   const off = route({ preset: 'playtest-build', project: 'workspace-app', needs: [] });
@@ -61,13 +61,17 @@ test('route: the five rules, first match winning, and both fallbacks', () => {
 });
 
 test('route: rule 4 reads the project defaults table', () => {
-  const row = PROJECT_DEFAULTS.find(entry => entry.id === 'workspace-app');
+  // Workspace app runs on the PC by default (ws-3o5); Discord bots is the cloud project.
+  assert.equal(PROJECT_DEFAULTS.find(entry => entry.id === 'workspace-app').runsOn, 'pc');
+  assert.equal(route({ preset: 'code-task', project: 'workspace-app', repo: 'example/a' }).rule, 4);
+  const row = PROJECT_DEFAULTS.find(entry => entry.id === 'shadowdark');
   const before = row.runsOn;
+  assert.equal(before, 'cloud');
   try {
     row.runsOn = 'pc';
-    assert.equal(route({ preset: 'code-task', project: 'workspace-app', repo: 'example/a' }).rule, 4);
+    assert.equal(route({ preset: 'code-task', project: 'shadowdark', repo: 'example/a' }).rule, 4);
   } finally { row.runsOn = before; }
-  assert.equal(route({ preset: 'code-task', project: 'workspace-app', repo: 'example/a' }).rule, 5);
+  assert.equal(route({ preset: 'code-task', project: 'shadowdark', repo: 'example/a' }).rule, 5);
 });
 
 test('every preset renders with no placeholder left, under 16 KB, and ends with the shared lines', () => {
@@ -291,7 +295,7 @@ async function fixture() {
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
-  fake.seed('sections/workspace-app/workspace.json', '{"name":"Workspace app","tracked":{"repo":"example/workspace-app"},"entities":[]}\n', 'application/json');
+  fake.seed('sections/shadowdark/workspace.json', '{"name":"Workspace app","tracked":{"repo":"example/shadowdark"},"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true, now: () => new Date('2026-10-29T10:00:00Z') });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
@@ -319,8 +323,8 @@ test('GET /hub/presets lists 11 and the rules; /hub/presets/route answers like r
     assert.equal(JSON.stringify(body).includes('template'), false);
     const routed = await get('/hub/presets/route?preset=code-task&project=magic-loops');
     assert.deepEqual([routed.body.target, routed.body.rule], ['pc', 4]);
-    const tracked = await get('/hub/presets/route?preset=code-task&project=workspace-app');
-    assert.match(tracked.body.why, /no cloud routine for example\/workspace-app yet/, 'The repo comes from the section\'s tracked repo.');
+    const tracked = await get('/hub/presets/route?preset=code-task&project=shadowdark');
+    assert.match(tracked.body.why, /no cloud routine for example\/shadowdark yet/, 'The repo comes from the section\'s tracked repo.');
     assert.equal((await get('/hub/presets/route?preset=nope&project=magic-loops')).status, 400);
     assert.equal((await get('/hub/presets/route?preset=research&project=Bad%20Name')).status, 400);
     assert.equal((await get('/hub/presets/other')).status, 404);
@@ -341,14 +345,14 @@ test('POST /hub/requests with a preset stores origin owner and the routed target
     assert.equal(stored.when, undefined);
     assert.equal((await get(`/hub/requests/${made.body.id}`)).body.state, 'proposed');
 
-    const code = await post('/hub/requests', { project: 'workspace-app', text: 'Fix the header', preset: 'code-task', title: 'Header', doneWhen: 'it shows' });
+    const code = await post('/hub/requests', { project: 'shadowdark', text: 'Fix the header', preset: 'code-task', title: 'Header', doneWhen: 'it shows' });
     const codeStored = fake.json(`sections/inbox/requests/${code.body.id}/request.json`);
-    assert.deepEqual([codeStored.repo, codeStored.target, codeStored.title, codeStored.doneWhen], ['example/workspace-app', 'pc', 'Header', 'it shows']);
-    const named = await post('/hub/requests', { project: 'workspace-app', text: 'Fix it', preset: 'code-task', target: 'cloud' });
+    assert.deepEqual([codeStored.repo, codeStored.target, codeStored.title, codeStored.doneWhen], ['example/shadowdark', 'pc', 'Header', 'it shows']);
+    const named = await post('/hub/requests', { project: 'shadowdark', text: 'Fix it', preset: 'code-task', target: 'cloud' });
     assert.equal(fake.json(`sections/inbox/requests/${named.body.id}/request.json`).target, 'cloud', 'A target the owner names is kept.');
-    const sprite = await post('/hub/requests', { project: 'workspace-app', text: 'Draw', preset: 'sprite-set' });
+    const sprite = await post('/hub/requests', { project: 'shadowdark', text: 'Draw', preset: 'sprite-set' });
     assert.deepEqual(fake.json(`sections/inbox/requests/${sprite.body.id}/request.json`).needs, ['comfyui', 'sprite-studio', 'gpu']);
-    assert.equal((await post('/hub/requests', { project: 'workspace-app', text: 'x', preset: 'research', target: 'pc' })).status, 400, 'Research does not run on the PC.');
+    assert.equal((await post('/hub/requests', { project: 'shadowdark', text: 'x', preset: 'research', target: 'pc' })).status, 400, 'Research does not run on the PC.');
     const avatar = await post('/hub/requests', { project: 'sprite-studio', text: 'Pixel sprite for Claude Code: your sessions', preset: 'agent-avatar', agent: 'claude' });
     assert.equal(avatar.status, 201, JSON.stringify(avatar.body));
     assert.equal(avatar.body.target, 'pc');

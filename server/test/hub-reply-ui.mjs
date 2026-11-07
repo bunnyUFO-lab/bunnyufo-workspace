@@ -4,6 +4,7 @@
 // not started and a job still going show the box off with their reasons; a phone shows the box without sideways scroll.
 import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
+import { approveStored } from './approve-stored.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { openLog, showInLog } from './run-log.mjs';
@@ -58,8 +59,7 @@ try {
   step('a run is approved and ends: the request page has a reply box, off until there is text');
   const page = await open({ width: 1280, height: 1000 });
   await page.goto(`${live.url}#/~hub/needs`);
-  await page.locator(`[data-need="approval-${ids.done}"] [data-approval-approve]`).click();
-  await page.locator('[data-next-note]').waitFor();
+  await approveStored(page, `[data-need="approval-${ids.done}"] [data-approval-approve]`);
   await page.goto(`${live.url}#/~hub/request/${encodeURIComponent(ids.done)}`);
   await page.locator('[data-run-state-chip]', { hasText: 'Done' }).waitFor({ timeout: ms(30000) });
   const box = page.locator(GATE);
@@ -173,8 +173,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   const steerer = await open({ width: 1280, height: 1000 });
   await steerer.goto(`${slow.url}#/~hub/needs`);
-  await steerer.locator(`[data-need="approval-${steerIds.read}"] [data-approval-approve]`).click();
-  await steerer.locator('[data-next-note]').waitFor();
+  await approveStored(steerer, `[data-need="approval-${steerIds.read}"] [data-approval-approve]`);
   await steerer.goto(`${slow.url}#/~hub/request/${encodeURIComponent(steerIds.read)}`);
   const readView = steerer.locator(`[data-run-view="${steerIds.read}"]`);
   await readView.locator('[data-run-text]', { hasText: 'Reading sources.' }).waitFor();
@@ -209,8 +208,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   const refused = await open({ width: 1280, height: 1000 });
   await refused.goto(`${refuse.url}#/~hub/needs`);
-  await refused.locator(`[data-need="approval-${steerIds.refused}"] [data-approval-approve]`).click();
-  await refused.locator('[data-next-note]').waitFor();
+  await approveStored(refused, `[data-need="approval-${steerIds.refused}"] [data-approval-approve]`);
   await refused.goto(`${refuse.url}#/~hub/request/${encodeURIComponent(steerIds.refused)}`);
   const refusedView = refused.locator(`[data-run-view="${steerIds.refused}"]`);
   await refusedView.locator('[data-run-text]', { hasText: 'Reading sources.' }).waitFor();
@@ -233,8 +231,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   const stopper = await open({ width: 1280, height: 1000 });
   await stopper.goto(`${hold.url}#/~hub/needs`);
-  await stopper.locator(`[data-need="approval-${steerIds.stopped}"] [data-approval-approve]`).click();
-  await stopper.locator('[data-next-note]').waitFor();
+  await approveStored(stopper, `[data-need="approval-${steerIds.stopped}"] [data-approval-approve]`);
   await stopper.goto(`${hold.url}#/~hub/request/${encodeURIComponent(steerIds.stopped)}`);
   const held = stopper.locator(`[data-run-view="${steerIds.stopped}"]`);
   await held.locator('[data-run-text]', { hasText: 'Working.' }).waitFor();
@@ -269,8 +266,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   const asker = await open({ width: 1280, height: 1000 });
   await asker.goto(`${asking.url}#/~hub/needs`);
-  await asker.locator(`[data-need="approval-${askId}"] [data-approval-approve]`).click();
-  await asker.locator('[data-next-note]').waitFor();
+  await approveStored(asker, `[data-need="approval-${askId}"] [data-approval-approve]`);
   await asker.goto(`${asking.url}#/~hub/request/${encodeURIComponent(askId)}`);
   const askView = asker.locator(`[data-run-view="${askId}"]`);
   await askView.locator('[data-run-text]', { hasText: 'Looking.' }).waitFor();

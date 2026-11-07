@@ -254,9 +254,9 @@ test('start: Bunnylink, a project with no PC runs, a bad timebox, no sign-in, no
     const bunny = await f.post('/hub/map/bunnylink/sprint/bl-ms', { timebox: 90 });
     assert.equal(bunny.status, 400);
     assert.match(bunny.body.error, /^Sprints run on the PC\. Bunnylink has no PC runs\.$/);
-    const cloud = await f.post('/hub/map/workspace-app/sprint/ws-ms', { timebox: 90 });
+    const cloud = await f.post('/hub/map/shadowdark/sprint/sd-ms', { timebox: 90 });
     assert.equal(cloud.status, 400);
-    assert.match(cloud.body.error, /Sprints run on the PC\. Workspace app has no PC runs\./);
+    assert.match(cloud.body.error, /Sprints run on the PC\. Discord bots has no PC runs\./);
     assert.deepEqual(f.heads(), [], 'Nothing was written by any refusal.');
     assert.equal((await f.start(90)).status, 201);
     assert.equal((await f.start(90)).status, 409, 'One sprint per project at a time.');

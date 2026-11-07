@@ -309,7 +309,7 @@ for (const via of ['api', 's3']) {
       fake.seed(`${folder(id)}evidence-02-20261027T151000000Z-bbbb.jpg`, jpgBytes, 'image/jpeg');
       fake.seed(`${folder(id)}shot-20261027T152000000Z-cccc.png`, shotBytes, 'image/png');
       const pictured = await cli(via, 'checklist', 'get', id);
-      assert.match(pictured.stdout, /\[ \] 02 Invite it\n {5}evidence: evidence-02-20261027T151000000Z-bbbb\.jpg\n/, 'The newest picture of a step.');
+      assert.match(pictured.stdout, /\[ \] 02 Invite it\n {5}evidence: evidence-02-20261027T150000000Z-aaaa\.png\n {5}evidence: evidence-02-20261027T151000000Z-bbbb\.jpg\n/, 'Every picture of a step, oldest first.');
       assert.match(pictured.stdout, /screenshot: shot-20261027T152000000Z-cccc\.png/);
       assert.deepEqual(JSON.parse((await cli(via, 'checklist', 'get', id, '--json')).stdout).items[1].evidence, 'evidence-02-20261027T151000000Z-bbbb.jpg');
       const into = path.join(dir, 'pictures');
@@ -2718,3 +2718,102 @@ test('plan apply --journal that already holds every row exits 0 and runs nothing
     assert.deepEqual(await calls(), []);
   } finally { await close(); }
 });
+
+// --- Pictures the owner attached: `ask wait` and `checklist wait` download them with no extra flag ---
+
+const ANSWER_PIC = 'answer.pic-20261106T101112123Z-ab12.jpg';
+const NOTE_PIC = 'shot-note-20261106T101113123Z-cd34.png';
+const escaped = text => text.replace(/\./g, '\\.');
+
+for (const via of ['api', 's3']) {
+  test(`pictures (${via}): ask wait saves the answer's pictures and the drawing inside the checkout, out of git, and prints full paths`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      const repoDir = path.join(dir, 'checkout');
+      await mkdir(repoDir);
+      execFileSync('git', ['init', '-q'], { cwd: repoDir });
+      cli.cwd = repoDir;
+      const created = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'See the picture?');
+      const id = created.stdout.trim().split('\n').at(-1);
+      const bytes = Buffer.concat([JPEG_BYTES, Buffer.from('owner picture')]);
+      const drawn = Buffer.concat([PNG_BYTES, Buffer.from('drawing')]);
+      fake.seed(`sections/inbox/asks/${id}/${ANSWER_PIC}`, bytes, 'image/jpeg');
+      fake.seed(`sections/inbox/asks/${id}/answer.png`, drawn, 'image/png');
+      fake.seed(`sections/inbox/asks/${id}/answer.json`, JSON.stringify({ at: new Date().toISOString(), by: 'owner', note: 'look', pictures: [ANSWER_PIC, '../escape.jpg'], drawing: { excalidraw: 'answer.excalidraw', png: 'answer.png' } }), 'application/json');
+
+      const waited = await cli(via, 'ask', 'wait', id, '--timeout', '1', '--every', '5');
+      assert.equal(waited.code, 0, waited.stderr);
+      assert.match(waited.stdout, /== pictures\nThe owner attached 2 pictures\. Open each file:\n/);
+      const lines = waited.stdout.split('\n').filter(line => line.startsWith('saved: ')).map(line => line.slice(7));
+      assert.equal(lines.length, 2);
+      for (const file of lines) assert.ok(path.isAbsolute(file), file);
+      const folder = path.join(repoDir, '.buw', 'pictures', `ask-${id}`);
+      assert.deepEqual((await readdir(folder)).sort(), ['answer.png', ANSWER_PIC].sort());
+      assert.deepEqual(await readFile(path.join(folder, ANSWER_PIC)), bytes);
+      assert.deepEqual(await readFile(path.join(folder, 'answer.png')), drawn);
+      assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repoDir, encoding: 'utf8' }).trim(), '', 'The checkout stays clean.');
+      assert.match(await readFile(path.join(repoDir, '.git', 'info', 'exclude'), 'utf8'), /^\.buw\/pictures\/$/m);
+
+      // A second run keeps what is there, and --json says where it all went.
+      const json = await cli(via, 'ask', 'wait', id, '--timeout', '1', '--every', '5', '--json');
+      assert.equal(json.code, 0, json.stderr);
+      assert.deepEqual(JSON.parse(json.stdout).saved.map(file => path.basename(file)).sort(), ['answer.png', ANSWER_PIC].sort());
+      assert.equal((await readFile(path.join(repoDir, '.git', 'info', 'exclude'), 'utf8')).match(/\.buw\/pictures\//g).length, 1, 'The exclude line is added once.');
+
+      // --into picks the folder.
+      const into = path.join(dir, 'chosen');
+      const got = await cli(via, 'ask', 'get', id, '--into', into);
+      assert.equal(got.code, 0, got.stderr);
+      assert.deepEqual((await readdir(into)).sort(), ['answer.png', ANSWER_PIC].sort());
+    } finally { await close(); }
+  });
+
+  test(`pictures (${via}): outside a checkout they go to the temp folder, and a picture that cannot be fetched is named while the command still exits 0`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    const made = [];
+    try {
+      const plain = path.join(dir, 'not-a-repo');
+      await mkdir(plain);
+      cli.cwd = plain;
+      cli.env = { GIT_CEILING_DIRECTORIES: dir };
+      const created = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Gone picture?');
+      const id = created.stdout.trim().split('\n').at(-1);
+      made.push(path.join(os.tmpdir(), 'cards-pictures', `ask-${id}`));
+      fake.seed(`sections/inbox/asks/${id}/answer.json`, JSON.stringify({ at: new Date().toISOString(), by: 'owner', pictures: [ANSWER_PIC] }), 'application/json');
+      const waited = await cli(via, 'ask', 'wait', id, '--timeout', '1', '--every', '5');
+      assert.equal(waited.code, 0, 'The answer arrived, so the command succeeds.');
+      assert.match(waited.stdout, new RegExp(`picture not saved: ${escaped(ANSWER_PIC)} \\(not found\\)\\. Try: cards ask get ${id}`));
+      fake.seed(`sections/inbox/asks/${id}/${ANSWER_PIC}`, JPEG_BYTES, 'image/jpeg');
+      const again = await cli(via, 'ask', 'get', id);
+      assert.equal(again.code, 0, again.stderr);
+      const saved = again.stdout.split('\n').find(line => line.startsWith('saved: ')).slice(7);
+      assert.ok(saved.startsWith(path.join(os.tmpdir(), 'cards-pictures')), saved);
+      assert.deepEqual(await readFile(saved), JPEG_BYTES);
+    } finally { for (const folder of made) await rm(folder, { recursive: true, force: true }); await close(); }
+  });
+
+  test(`pictures (${via}): checklist wait saves every picture of every step, the screenshots and the note's`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      const repoDir = path.join(dir, 'checkout');
+      await mkdir(repoDir);
+      execFileSync('git', ['init', '-q'], { cwd: repoDir });
+      cli.cwd = repoDir;
+      const made = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'Pictures please', '--item', 'One', '--item', 'Two');
+      const id = made.stdout.trim().split('\n').at(-1);
+      const files = ['evidence-01-20261106T100000000Z-aaaa.png', 'evidence-01-20261106T100100000Z-bbbb.jpg', 'evidence-02-20261106T100200000Z-cccc.png', NOTE_PIC];
+      for (const name of files) fake.seed(`sections/inbox/checklists/${id}/${name}`, Buffer.concat([name.endsWith('png') ? PNG_BYTES : JPEG_BYTES, Buffer.from(name)]), name.endsWith('png') ? 'image/png' : 'image/jpeg');
+      fake.seed(`sections/inbox/checklists/${id}/submit.json`, JSON.stringify({ at: new Date().toISOString(), by: 'owner', done: [], open: ['01', '02'], pictures: [NOTE_PIC] }), 'application/json');
+      const waited = await cli(via, 'checklist', 'wait', id, '--timeout', '1', '--every', '5');
+      assert.equal(waited.code, 0, waited.stderr);
+      assert.match(waited.stdout, /== pictures\nThe owner attached 4 pictures\./);
+      assert.match(waited.stdout, /evidence: evidence-01-20261106T100000000Z-aaaa\.png\n {5}evidence: evidence-01-20261106T100100000Z-bbbb\.jpg/, 'Both pictures of step 1.');
+      assert.match(waited.stdout, new RegExp(`note picture: ${escaped(NOTE_PIC)}`));
+      assert.deepEqual((await readdir(path.join(repoDir, '.buw', 'pictures', `checklist-${id}`))).sort(), [...files].sort());
+      assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repoDir, encoding: 'utf8' }).trim(), '');
+      const json = JSON.parse((await cli(via, 'checklist', 'get', id, '--json')).stdout);
+      assert.equal(json.saved.length, 4);
+      assert.deepEqual(json.notePictures, [NOTE_PIC]);
+    } finally { await close(); }
+  });
+}

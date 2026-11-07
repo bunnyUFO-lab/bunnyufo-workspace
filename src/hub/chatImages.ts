@@ -9,6 +9,8 @@ const MAX_BYTES = 1.5 * 1024 * 1024
 
 export interface Prepared { id: number; blob: Blob; type: 'image/jpeg' | 'image/png'; width: number; height: number; url: string }
 
+export const isPicture = (file: File) => file.type.startsWith('image/')
+
 export const CANNOT_OPEN = "This picture can't be opened here. Try a JPEG or PNG."
 
 let counter = 0

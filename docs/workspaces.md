@@ -189,14 +189,14 @@ One private S3 bucket holds every section:
 
 ```
 s3://<bucket>/
-  sections/<id>/workspace.json      the card list; its "name" is what the switcher shows
+  sections/<id>/workspace.json      the card list; its "name" is what the project filter shows
   sections/<id>/<card folder>/…     the card files, exactly as in the workspace folder
   sections/<id>/_shared/…           report styles and scripts (reports load ../_shared/)
   state.json                        pinned, archived, tags and the pinned order, for every section
 ```
 
 A section whose `workspace.json` carries `"hidden": true` holds data, not cards (the agents' `inbox`):
-`/sites.json` lists it with `hidden: true`. `/w/<id>/…` does not serve it, and the switcher and the
+`/sites.json` lists it with `hidden: true`. `/w/<id>/…` does not serve it, and the project filter and the
 unknown-site list never show it. The ids `inbox` and `assistant` are reserved for the card API: no
 local workspace can be registered with them or publish over them.
 
@@ -209,7 +209,7 @@ dot or space) and says `left on the site: <key> is not a safe path here`; it nev
 A small service (`site/api`, container `buw-site-api`, port 8099) is the only thing that reads
 it. Caddy (`site/caddy/Caddyfile`) forwards `/sites.json`, `/w/<id>/<file>` and `/api/*` to it:
 
-- `/sites.json` lists the sections the bucket holds, so a new section is in the switcher as soon
+- `/sites.json` lists the sections the bucket holds, so a new section is in the project filter as soon
   as its `workspace.json` is uploaded. Nothing on the server has to be edited.
 - `/w/<id>/<file>` streams the object with its ETag and content type. Only keys under
   `sections/` are reachable this way; `state.json` and anything else in the bucket are not. Nor are the
@@ -377,10 +377,12 @@ user (`Remote-User`), like every other write.
 |---|---|
 | `GET /api/hub/today`, `/inbox?filter=&project=`, `/events?since=&project=`, `/projects` | What needs the owner, what runs, what happened (a seven-day window of events) |
 | `GET /api/hub/asks/:id`; `POST …/answer`, `…/snooze`, `…/cancel` | An Ask and its state; answering writes `answer.json` once (a second answer is a 409 carrying the first); an answered Ask also carries `delivery`: where the answer went, from `delivered.json` and up to 3 `watch-*.json` (see below) |
-| `GET /api/hub/checklists/:id` | A checklist: the list as the agent wrote it plus `state`, `done`, `total`, each item's `done` and `at`, `submit`, `pickup`, `cancel` and the `files` in its folder |
+| `POST /api/hub/asks/:id/files`; `POST …/files/:file/delete` | `{ image: { type, data } }`: one picture for the answer, in the chat shape and with the chat limits. Stored create-only as `asks/<id>/answer.pic-<stamp>-<rand4>.<jpg\|png>`; at most 4 an Ask; 409 unless the Ask is open or snoozed and takes pictures (a note or a drawing, and none of `rerun`, `agentEdit`, `avatar`, `changes`). The delete takes back one that is not sent. The answer names the kept ones as `pictures: [names]` (a name that is gone is a 400 and nothing is written), and every `answer.pic-*` it does not name is deleted. The Ask detail carries `pendingPictures` while it waits |
+| `GET /api/hub/checklists/:id` | A checklist: the list as the agent wrote it plus `state`, `done`, `total`, each item's `done` and `at`, `submit`, `pickup`, `cancel` and the `files` in its folder; also `evidenceFiles` (`{ "03": [names] }`, every picture of each step) and `notePictures` |
 | `POST /api/hub/checklists/:id/items/:item` | `{ done: boolean }`: tick or untick one item. Writes one create-only `tick-` or `untick-` file; nothing when the item already is as asked; 409 unless the list is `open`. Answers with the fresh detail |
-| `POST /api/hub/checklists/:id/files` | `{ for: "03" \| "issue", image: { type: 'image/jpeg' \| 'image/png', data: <base64> } }`: one picture for a step (evidence) or a playtest issue (screenshot), in the chat picture shape and with the chat limits: at most 1.5 MB decoded, 1 to 2048 px a side, the bytes checked against the type (WebP and GIF are 415), EXIF and GPS stripped. Writes one create-only `evidence-<step>-<stamp>-<rand4>.<jpg\|png>` or `shot-<stamp>-<rand4>.<jpg\|png>` in the list's own folder. 201 `{ file, at }`; 404 for a step the list does not have; 409 unless the list is `open`, beyond 5 pictures for a step or 30 screenshots; the body limit is 8 MB. The detail carries `evidence` (`{ "03": { file, at } }`, the newest per step) and `shots` |
-| `POST /api/hub/checklists/:id/submit` | `{ note? }`: send the list back. Writes `submit.json` create-only (with the done and open item ids) and then a `checklist-submitted` event; 409 for a cancelled list, and for a second submit (the 409 carries the first `submit`) |
+| `POST /api/hub/checklists/:id/files` | `{ for: "03" \| "issue" \| "note", image: { type: 'image/jpeg' \| 'image/png', data: <base64> } }`: one picture for a step (evidence) or a playtest issue (screenshot), in the chat picture shape and with the chat limits: at most 1.5 MB decoded, 1 to 2048 px a side, the bytes checked against the type (WebP and GIF are 415), EXIF and GPS stripped. Writes one create-only `evidence-<step>-<stamp>-<rand4>.<jpg\|png>` `shot-<stamp>-<rand4>.<jpg\|png>`, or for the note `shot-note-<stamp>-<rand4>.<jpg\|png>` (at most 4) in the list's own folder. 201 `{ file, at }`; 404 for a step the list does not have; 409 unless the list is `open`, beyond 5 pictures for a step or 30 screenshots; the body limit is 8 MB. The detail carries `evidence` (`{ "03": { file, at } }`, the newest per step) and `shots` |
+| `POST /api/hub/checklists/:id/files/:file/delete` | Take back a picture of a list that is still `open` (a name matching `evidence-`, `shot-` or `shot-note-`) |
+| `POST /api/hub/checklists/:id/submit` | `{ note?, pictures? }`: send the list back; `pictures` names the note's pictures that are kept (the rest are deleted). Writes `submit.json` create-only (with the done and open item ids) and then a `checklist-submitted` event; 409 for a cancelled list, and for a second submit (the 409 carries the first `submit`) |
 | `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
 | `GET /api/hub/reviews/:id` | One review's detail, from its `ready-for-review` event in the last seven days (404 otherwise): title, summary, checked links, `closing` (a sprint-end item: the prompt and what is not done), card files, screenshots in before/after pairs, verdicts, and whether it is `done` |
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }`, or from Spawn `{ project, text, preset, title?, repo?, needs?, target?, doneWhen?, agent?, replaces?, drawing? }`: needs a signed-in user, stores `origin: { kind: owner }` (a body `origin` or `followUp` is ignored) and the routed `target`, and answers `{ id, target, why }` (see Requests) |
@@ -487,7 +489,7 @@ list: each command a brief needs must already be in the project's PC allow list,
 `blocked-command`. The target
 comes from the first matching rule: (1) project `bunnylink` is `at-pc`; (2) the preset or request needs
 something only the PC has: `pc`; (3) research: `hermes`; (4) the project's `runsOn` in
-`project-defaults.mjs` is `pc`: `pc`; (5) a repo is known: `cloud`, else `pc`. A result outside the preset's
+`project-defaults.mjs` is `pc` (Magic Loops, Sprite Studio and Workspace app): `pc`; (5) a repo is known: `cloud`, else `pc`. A result outside the preset's
 targets becomes its first target, and `cloud` without a cloud routine for the repo becomes `pc`.
 
 Signed files (`approved.json`, `stop.json`) carry `signature`: base64 Ed25519 over the canonical JSON of the rest
@@ -661,8 +663,9 @@ written create-only; nothing is ever overwritten or deleted. `<id>` has the Ask 
 |---|---|---|
 | `checklist.json` | agent | The list (title, `context?`, `card?`, `bead?`, `from`, `items`: `{ id: "01"…"50", text, group?, guide?, link? }`). Written once. Limits: 1 to 50 items; text 200, group 80, guide and context 4000 characters; links are `http(s)`; 256 KB |
 | `tick-<item>-<stamp>-<rand4>.json`, `untick-…` | Hub only | The owner ticked or unticked item `<item>` at `<stamp>` (UTC with milliseconds, `20261027T143012123Z`, the Hub's clock). Body `{ item, done, at, by }` |
-| `submit.json` | Hub only | `{ at, by, note?, done: [ids], open: [ids] }` |
+| `submit.json` | Hub only | `{ at, by, note?, pictures?: [names], done: [ids], open: [ids] }` |
 | `evidence-<step>-<stamp>-<rand4>.jpg\|png`, `shot-<stamp>-<rand4>.jpg\|png` | Hub only | The owner's picture for step `<step>`, or for a playtest issue. The newest evidence file per step is the one shown; the card API refuses an agent writing or deleting them, and `cards checklist get <id> --into <dir>` downloads them. Served by `/api/hub/file?path=checklists/<id>/<file>` (only these names) |
+| `shot-note-<stamp>-<rand4>.jpg\|png` | Hub only | A picture the owner attached to the note; `submit.json` names the kept ones. Same rules as the other pictures |
 | `pickup.json` | agent | The agent read the submission and acted on it (`{ at, host, session? }`) |
 | `cancel.json` | agent | The agent withdrew the list (`{ at, by }`) |
 
@@ -871,11 +874,11 @@ Everything the Hub writes goes under `sections/inbox/` and nowhere else; `inboxK
 
 ## Making a new workspace
 
-In the local app, open the switcher under the logo and choose **＋ New workspace…**. It makes
+In the local app, open **Settings** and use **New workspace** under Workspaces. It makes
 a folder beside the open workspace with the template files and an empty card list, registers
 it, and gives it the bucket and site of its neighbours with its own id in place of theirs, so
-`npm run publish` puts it on the site. **Add existing folder…** registers a folder you already
-have.
+`npm run publish` puts it on the site. **Add and open** registers a folder you already
+have. Either one is switched to and shown in the Library's project filter.
 
 By hand:
 
@@ -884,21 +887,22 @@ By hand:
    `.gitignore`. Leave the sample cards behind.
 2. **Start an empty card list:** a `workspace.json` with
    `{ "name": "<Name>", "entities": [] }`. The optional `name` is what the published site's
-   switcher shows; without it the site falls back to the id in title case.
+   project filter shows; without it the site falls back to the id in title case.
 3. **Register it:**
    `npm run workspace add <folder> --name "<Name>" --bucket s3://<bucket>/sections/<id> --site https://<your-site>/<id> --use`.
    The app cannot work out `--site` on its own; without it a workspace can look unpublished
    while its site is fine.
 4. **Check it:** `npm run publish`, then open the site and confirm the workspace is in the
-   switcher.
+   Library's project filter.
 
-Or start it from the site's switcher on any device (**＋ New workspace…**), then
+Or start it from Settings on the site, on any device (**＋ New workspace…**), then
 `npm run workspace add` the folder locally and `npm run publish -- --pull` to bring it down.
 
 ## Making cards by hand
 
 On the published site and in the local app, **＋ New card** on the board makes a card: a title,
-an optional description, and the workspace it goes in. It starts with one Markdown section and
+an optional description, and the project it goes in. The form always shows that project: the one in the
+filter, or chips to pick from when the filter shows all or several (the button stays off until one is on). It starts with one Markdown section and
 opens in the editor. On a card, **＋** after the tabs adds another Markdown section, and the pencil
 beside the title changes the title and description. Every Markdown section has Edit and Save
 (Ctrl+E, Ctrl+S).
@@ -1034,16 +1038,36 @@ covered.
 
 ### PC status
 
-The Gaming PC's report script writes a status file about once a minute to `inbox/pc/status-<YYYYMMDDTHHMMSSZ>.json` (create-only, at most 64 KB, `v: 1`; `pc` is one of the Hub's folders). The file holds the host slug, whether someone is using the machine, the GPU band, ComfyUI and Unity, and the open Claude Code sessions (name, status, folder, repo, project, branch, links). `sessions` is `null` when the PC could not list them. `runs` is always `[]` for now.
+The Gaming PC's report script writes a status file about once a minute to `inbox/pc/status-<YYYYMMDDTHHMMSSZ>.json` (create-only, at most 64 KB, `v: 1`; `pc` is one of the Hub's folders). The file holds the host slug, whether someone is using the machine, the GPU band, ComfyUI and Unity, and the open Claude Code sessions (name, status, folder, repo, project, branch, links). `sessions` is `null` when the PC could not list them. `runs` is always `[]` for now. It also holds `runner` (ws-3o5), added by the report script from the runner's own config: `{ projects, launch, busy, full, pausedUntil? }`, that is the project ids the runner serves, whether launching is on, the projects with a run going, `concurrent` or `day` when that cap is reached, and when a usage pause ends. Only ids, booleans and one time, never a folder; the site drops any id that is not a project id. A report without it (an old reporter) is read as "the Hub knows nothing about the runner".
 
 | Route | Does |
 |---|---|
+| `GET /api/hub/pc/start?project=<id>` | `{ pcWait }`: whether the PC can start a job of this project (see "Jobs the PC cannot start"), or `null`. Spawn and the approval page ask it before they promise a start; a bad project id is 400 |
 | `GET /api/hub/pc` | `{ pc, status }`: the summary (`state` is `on`, or `asleep-or-off` when the file is over 15 minutes old; `ageSeconds`, `inUse`, `keepAwake`, `gpu`, `comfy`, `unity`, busy and idle session counts) and the cleaned file. Both are `null` when there is no valid file |
 | `GET /api/hub/today` | Also carries `working` (the Working now list) and `pc` (the summary or `null`). `counts.running` is the number of `working` and `needs-you` items; `running` is still the event-derived list, for old clients |
 
 The site reads the newest file in this hour and the one before (the day prefixes only when both are empty). The listing on Today and Work may be up to 15 seconds old (see the listing cache); `/hub/pc` reads live. A file that fails `validStatus` (wrong version, bad host or time, over 30 sessions) counts as no file; inside a valid one, folders and repos are cut to their last path segment, links must be real session links, and unknown fields are dropped.
 
 Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status: `busy` is `working`, `idle` is `idle`, and a session with an open `blocked` event is `needs-you`. A running session from a `session-started` event on another host is added. Events from the PC's own host are dropped while its status is fresh. With no fresh status it is the event-derived list, as before. A session whose plugin posts a heartbeat (a `session-items` event with no `touched`, at most every 10 minutes while the session works) counts as having given word: it keeps an event-derived row Working past the two quiet hours instead of "No word since". A heartbeat never resolves a blocked session and is not listed in Activity. The Beads id comes from the branch name and the project's prefix in `site/api/project-defaults.mjs`.
+
+### Jobs the PC cannot start
+
+The runner on the PC only takes jobs of the projects in its `runs-config.json`, and only while launching is on. The Hub reads that from the PC report (`runner`, above) and judges every approved PC job in `site/api/hub-pc-wait.mjs`. A cause with no end in sight is a **block**; a queue that ends soon is a **wait**. Blocks, checked in this order:
+
+| Cause | When | The words | Fix shown |
+|---|---|---|---|
+| `pc-silent` | the newest status is over 15 minutes old, or none is recent but this host has had a PC reporter | "The PC is not answering": it is probably asleep or off ("This PC hasn't reported lately" past 7 days) | Retry wakes the PC, only when a wake is set up |
+| `not-on-runner` | the project is not in `runner.projects` | "The PC does not run <project> yet" | the command `install.ps1 -AddRepo <path> -Yes`, run from the runner's checkout, or the cloud |
+| `launch-off` | `runner.launch` is false | "Starting jobs is off on the PC" | the command `install.ps1 -Runs -Launch on` |
+| `login-expired` | `runner.pausedReason` is `login-expired` | "The PC needs you to sign in again" | `claude auth login`, then `node $HOME\.config\pc-dispatch\dispatch.mjs resume` (PowerShell, from any folder) |
+| `cap` | a pause or a full cap with no known end, a daily cap, or an end more than 4 hours away | "The PC is full for now" or "paused for a while" | none; the text says when it starts |
+
+**Waits** are never alerts. They show as a line on the job page: the owner is at the PC and the job opens windows (`approved.run.opensWindows`; the runner's `windows` rule); the project already has a run going (checked before the cap, so it holds when the runner allows one run at a time); `cap` and `usage-limit` that end within 4 hours (the time is in the line; a full concurrent cap ends when the running job's start plus its limit passes); `open-run` (the owner is in a resumed session at the PC); `add-repo` (an install is running). `pausedReason` is an enum (`usage-limit`, `login-expired`, `open-run`, `add-repo`); any other value is dropped.
+
+The status the verdict reads is the newest one in the last two days, else the newest in the last 7 days (by the day folders). With none in 7 days the verdict is `pc-silent` if the host has ever had a status, and unknown (no claim) if it never has. A fresh status without a `runner` block is also unknown.
+
+- **At approval.** `POST /requests/:id/approve` for the PC adds `pcWait` and, for a blocked job, `waiting` with one sentence. A PC that was just woken by the approval is not called silent. Spawn's note, the approval page's "Starts" line and the Approve toast say it instead of "within a few minutes". The job page (`GET /requests/:id`, `pcWait`) shows the 2 or 3 sentences, the step and the command in a copyable block, or the wait line.
+- **After 10 minutes.** An approved PC request with no `taken.json` for 10 minutes and a cause above is one **Needs you item** (`kind: 'pc-stuck'`, type "Job not started", under Sessions): a plain title, 2 or 3 sentences, the step with its copyable command, and the buttons that fit. Retry wakes the PC and shows only for `pc-silent` when a wake is set up. "Run it in the cloud" is `move-to-cloud` and shows only when the job could run there; for a stuck job it is open before the 6 hours (the route asks the same verdict again). Cancel is the signed stop. It is not stored: it is worked out from the files each time, so there is one per job, it never repeats, and it is gone when the job is taken, stopped, moved, or the cause goes away.
 
 ### Work
 
@@ -1075,13 +1099,15 @@ The Repo field of a code or docs job is a picker: the project's own repo first (
 
 ### The Approval item
 
-A proposed request is a Needs you item of kind Approval (`src/hub/ApprovalView.tsx`, a case in `NeedsItem.tsx`), and `#/~hub/request/<id>` opens the same item on its own page: this is the link a `#needs-you` ping carries. It shows the preset and project, who asked, and for a request that an agent or a run wrote the line "Written by <name>, not by you. Read it before approving." It also shows the text, where it runs and why (with a machine choice), its side effects, the time limit and when it starts. Approve (`POST /requests/:id/approve { target }`, or `again` for an expired one), Edit (Spawn on the request; its Approve calls `again` with the new text), and Decline (an optional reason) all hand the next item to the list (`Approved · next: …`). A request for the PC (`at-pc`) has Copy prompt and Mark done instead of Approve. A request signed by policy reads "Signed by policy". A request in any other state shows its state and outcome; the job page below fills it.
+A proposed request is a Needs you item of kind Approval (`src/hub/ApprovalView.tsx`, a case in `NeedsItem.tsx`), and `#/~hub/request/<id>` opens the same item on its own page: this is the link a `#needs-you` ping carries. It shows the preset and project, who asked, and for a request that an agent or a run wrote the line "Written by <name>, not by you. Read it before approving." It also shows the text, where it runs and why (with a machine choice), its side effects, the time limit and when it starts. Approve (`POST /requests/:id/approve { target }`, or `again` for an expired one), Edit (Spawn on the request; its Approve calls `again` with the new text), and Decline (an optional reason) all hand the next item to the list (`Approved · next: …`). A request for the PC (`at-pc`) has Copy prompt and Mark done instead of Approve. A request signed by policy reads "Signed by policy". For the PC, the Starts line says when the Hub knows the PC cannot start it (see "Jobs the PC cannot start"). A request in any other state shows its state and outcome; the job page below fills it.
 
 ### The job page
 
 `src/hub/WorkTabs.tsx` draws Work's four tabs as links, so each tap is one step of history: Running (`#/~hub/jobs/running`), Delivered (`jobs/finished`), Board (`work`) and Activity (`activity`). The bare `#/~hub/jobs` opens Running when anything runs, else Delivered. `src/hub/Jobs.tsx` holds the first two: a project picker and one row per job (dot, title, `Researcher · Hermes · 12 min ago`, pills) that opens the job's page. An Activity filter and a Board lane are chips and add no step.
 
 `#/~hub/request/<id>` is the job's page, for every state; there is no drawer. A plain link goes to it from a Today row, an alert, a Board card, the Spawn toast and a Work row. `src/hub/RunView.tsx` draws it. A finished job (a result in `done`, `failed`, `stopped` or `asking`) leads with the summary (`What it found`) and `What it delivered`: one row per deliverable with a button that opens it (`Open`; a PR opens in a new tab). A task a change list created shows as a task row with its id, whether or not a title is known. Then the reply box. The timeline, live lines, usage and `report.md` sit in a closed `<details data-run-did>` called `Live log`: a test that reads those opens it first (`server/test/run-log.mjs`). A job still going shows its timeline and an open `Live log` (`data-run-livelog`) that follows `GET /api/hub/requests/:id/events` while the page is open (`runStream.ts`): the answer text accumulates, a tool line shows `preview` and turns done or failed, and a Hermes approval shows its command with a link to answer it in Needs you. On `state` it reads the request again; leaving the page closes the stream. Stop (signed) shows while a run can be stopped and asks first (`Stop this job?`, then `Yes, stop it` or `Keep going`); Approve again for expired, failed and lost requests. A retry on quota says "Codex quota reached; retried on Anthropic."; the `asking` state shows the question and an Answer link. A visitor who cannot write sees the page without Stop, Approve again or Retry.
+
+A finished job that ran on the PC (`taken.runner` is `pc`; state `done`, `failed`, `stopped` or `asking`) adds **Continue it at the PC** above the reply box: a copyable `node $HOME/.config/pc-dispatch/dispatch.mjs open-run <request id>` and a line saying it works only in a terminal on that PC and not while the project has a run going. The command carries the request id and nothing else; the PC looks up the session and the folder itself. The session id is shown beside it when the Hub has one: `taken.session`, which the PC sends when it takes the request (`cards request take --session`). A cloud, Hermes or at-PC job, and a PC job still running, show nothing.
 
 ### Team
 
@@ -1113,6 +1139,22 @@ An avatar choice is the owner's. The site writes it as a create-only file, `inbo
 ### Agent config exports (card API rule)
 
 The Hermes host publishes a redacted copy of its profile settings as create-only files, `inbox/agent-config/export-<YYYYMMDDTHHMMSSZ>.json`, so the Hub can show an agent's model settings and prompts. The card API accepts these only from a token named `hermes-config` (rights `write=inbox`), only with `If-None-Match: *` and never through an upload URL; that token may write nothing else in the inbox, no other limited token may write under `agent-config/`, and a limited deleter cannot remove them. A file the token creates is stored with the object metadata `writer: hermes-config`, set by the handler alone (a caller's `x-amz-meta-*` headers are never forwarded). The passphrase can still write there, but its files carry no mark, so the Hub ignores them. Adding the token to `BUW_CARD_TOKENS` needs the card API deployed with this rule first.
+
+### Schedules (Team's third tab, view only)
+
+`#/~hub/team/schedules` lists everything that runs on a schedule, on one page (ws-eh2). A job's page is `#/~hub/team/schedules/hermes/<name>`: beside the list from 900 px, a page of its own on a phone. Team's tabs are Agents, Skills and plugins and Schedules; Search finds "Schedules", and an agent's page links "All schedules" under its jobs. Nothing on the page changes a job.
+
+| Route | Does |
+|---|---|
+| `GET /api/hub/schedules` | `{ sources, note, at }`. `sources` is `[{ id, label, state, as_of, items, text?, note?, total?, host?, timezone?, profileModels? }]` in page order: `hermes-jobs`, `hermes-timers`, `site-timers`, `pc-tasks`, `github`. `state` is `live`, `old` (the export is past the freshness rule: 7 hours) or `not-reporting`. 401 without a signed-in user when the site requires one: prompts are not for anonymous reads, and Team is otherwise open to guests. There is no write route |
+
+**Which copy of a job is real.** The Hermes host's scheduler runs the jobs in its own job file. The page shows an export of that file, at most about 15 minutes old, and says so: "These are the jobs the Hermes host runs now. The setup script in the homelab repo only adds a job that is missing, so changing it does not change a job that already exists." That script is a starter list.
+
+**The other three lists** (`site/api/hub-other-schedules.mjs` reads their shape and nowhere else). The PC's status file may carry a `schedules` field: `tasks` (`tasksAt`, `tasksTotal`, and rows `{ name, folder, state, schedule, nextRun?, lastRun?, lastResult, ours? }`, at most 60) and `github` (`githubAt` and rows `{ repo, workflow, cron, state, lastRun?, lastConclusion? }`, times in UTC); each half is left out when the PC never read it. The site host's timers come from `host-schedules.json` in the folder of the API's env file (`BUW_ENV_FILE`), `{ v: 1, exportedAt, hostLabel, timers: [{ name, description, schedule, enabled, nextRun, lastRun, lastResult }] }`; no setting of its own, and a missing file, a missing key or a file that does not read leaves the list at "Not reporting yet. This list arrives with a later update." A list is `old` when the PC's task list is past 3 hours or the host file past 1 hour. The page shows the repo's own tasks and folds the rest under "Other programs' tasks (N)"; it never shows an action, an argument or a path. GitHub's list comes through the PC, and the page says so. A run time with no zone is dropped ("Not reported"), not read in the server's zone.
+
+**The export's job fields** (`cleanJob` in `site/api/hub-agent-config.mjs`; the allow-list applies again on the site). Beyond `name`, `schedule`, `enabled` and `prompt`: `scheduleKind`, `state`, `model`, `provider`, `postsTo` and `failuresTo` (`{ platform, label }` or null: a label, never a raw channel id), `script` (a name only), `nextRunAt`, `lastRunAt`, `lastStatus`, `lastError` and `lastDeliveryError` (secrets replaced, cut at 200 characters), `failureStreak`, `runsDone`, `promptSha256` and `promptBytes` (of the whole prompt, before any cut), `promptCut`, `promptRedacted`, `rev`. A field the exporter did not send is absent, and the page says "Not reported", so an older exporter never shows a wrong value. The prompt cap is 8 KB. A profile also carries `timezone` (the zone its cron text runs in) and the export `hostLabel` and `hostTimers` (`{ name, description, schedule, enabled, lastResult }`, no run times). Lists the host does not report yet read "Not reporting yet. This list arrives with a later update."
+
+**The prompt alert.** In the sweep beside the profile-change events (Today, Inbox and Work loads, the details and schedules routes; at most every 30 seconds) the Hub compares each job's `promptSha256` in the newest fresh export with its own baseline, `inbox/agent-config/job-prompts-seen.json` = `{ v: 1, at, jobs: { '<profile>/<job>': '<sha256>' } }`. Only the Hub writes it (no token but the Hermes host's writes under `agent-config/`, and that one only exports and results). The first run stores the baseline and says nothing. A changed hash with no signed job change behind it writes one `alert` event, "The prompt of `<job>` changed on the Hermes host, not from Schedules. Check it.", which lands on Today's alerts and links to the job's page (the event carries `job` and `jobHash`, never prompt text). A new job and a missing job get a similar alert. Then the baseline moves, so it is told once. At most 8 alerts a sweep; a failure is logged and never fails a request.
 
 ### Profile changes (a signed change the Hermes host applies)
 

@@ -10,8 +10,8 @@ import { useIsPhone } from '../lib/chrome'
 import SearchField from './SearchField'
 import { host } from '../lib/host'
 import { find } from './mapState'
-import { hubHash, mapHash, projectHash, withScope, workBoardHash, workHash } from '../lib/route'
-import { swap } from '../lib/entries'
+import { hubHash, projectHash, withScope, workBoardHash, workHash } from '../lib/route'
+import { swap, useEntryMemo } from '../lib/entries'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { openSpawn } from './spawnStore'
@@ -23,6 +23,7 @@ import { ProjectLink } from './ProjectChip'
 import { useProject } from './useProject'
 import './work.css'
 import MapPanel from './MapPanel'
+import TaskWindow from './TaskWindow'
 import { defaultLane, sheetProject } from './workLanes'
 import { useSheetMap } from './workSheet'
 
@@ -61,14 +62,14 @@ function Marked({ text, q }: { text: string; q: string }) {
   return <>{parts.map((part, index) => (index % 2 ? <mark key={index}>{part}</mark> : part))}</>
 }
 
-function Card({ card, href, showProject, projectName, focused, onSheet, q = '', row }: { card: WorkCard; q?: string; /** The bead's text row, once the search has loaded it. */ row?: SearchRow; href: string; showProject: boolean; projectName: string; focused?: boolean; /** A plain click on a Beads card, which opens its sheet; it may take over the navigation. */ onSheet: (event: MouseEvent<HTMLAnchorElement>, href: string) => void }) {
+function Card({ card, href, showProject, projectName, focused, sheetOpen, onSheet, q = '', row }: { card: WorkCard; q?: string; /** The window of this card is open (the card only marks it when an `at` address named it). */ sheetOpen?: boolean; /** The bead's text row, once the search has loaded it. */ row?: SearchRow; href: string; showProject: boolean; projectName: string; focused?: boolean; /** A plain click on a Beads card, which opens its sheet; it may take over the navigation. */ onSheet: (event: MouseEvent<HTMLAnchorElement>, href: string) => void }) {
   const [glyph, source] = SOURCE[card.source]
   const beads = card.source === 'beads'
   // A hit that is only in the description or the acceptance criteria: the words the title and id lack, found in the text.
   const absent = words(q).filter(word => !`${card.id} ${card.title}`.toLowerCase().includes(word))
   const snippet = row && absent.length ? snippetOf(row.text, absent.join(' ')) : null
   const cardLink = (
-    <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}${focused ? ' focus' : ''}`} href={href} data-card={card.key} data-focused={focused ? 'true' : undefined} data-run-open={card.source === 'request' && card.state !== 'proposed' ? card.id : undefined} aria-haspopup={beads ? 'dialog' : undefined} aria-controls={beads && focused ? 'hub-map-panel' : undefined} onClick={beads ? event => onSheet(event, href) : undefined}>
+    <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}${focused ? ' focus' : ''}`} href={href} data-card={card.key} data-focused={focused ? 'true' : undefined} data-run-open={card.source === 'request' && card.state !== 'proposed' ? card.id : undefined} aria-haspopup={beads ? 'dialog' : undefined} aria-controls={beads && focused && sheetOpen ? 'hub-map-panel' : undefined} onClick={beads ? event => onSheet(event, href) : undefined}>
       <span className="wk-title"><Marked text={card.title} q={q} /></span>
       {snippet && <small className="wk-snip">text: <Marked text={snippet} q={q} /></small>}
       {card.why && <span className="wk-why">{card.nothingAsked && <><span className="wk-warn" role="img" aria-label="Nothing asked yet">⚠</span>{' '}</>}{card.why}</span>}
@@ -91,32 +92,17 @@ function Card({ card, href, showProject, projectName, focused, onSheet, q = '', 
   )
 }
 
-/** What the sheet shows while its map is on the way, or when the Hub could not give it. */
+/** What the window shows while its map is on the way, or when the Hub could not give it. */
 function SheetWaiting({ error, onClose }: { error: string | null; onClose: () => void }) {
-  const heading = useRef<HTMLHeadingElement>(null)
-  useEffect(() => {
-    heading.current?.focus({ preventScroll: true })
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
   return (
-    <>
-      <div className="hub-map-scrim" onClick={onClose} aria-hidden="true" />
-      <dialog open id="hub-map-panel" className="hub-map-panel" aria-labelledby="hub-map-panel-title">
-        <div className="hub-map-grab" aria-hidden="true" />
-        <div className="hub-map-panel-head">
-          <div className="hub-map-panel-heading"><h3 id="hub-map-panel-title" ref={heading} tabIndex={-1}>{error ? 'Details not available' : 'Loading…'}</h3></div>
-          <button type="button" className="hub-map-panel-close" aria-label="Close details" onClick={onClose}>×</button>
-        </div>
-        {error && <p className="hub-error" role="alert">{error}</p>}
-      </dialog>
-    </>
+    <TaskWindow title={error ? 'Details not available' : 'Loading…'} switchKey="waiting" onClose={onClose}>
+      {error && <p className="hub-error" role="alert">{error}</p>}
+    </TaskWindow>
   )
 }
 
 /** Work's Board tab: `project` is a project id, `all` for every project, or absent for the default one. */
-export default function Board(props: { project?: string; focus?: string; sprint?: string }) {
+export default function Board(props: { project?: string; focus?: string; /** `work/<board>/at/<bead>`: the card is marked in its lane and no window opens. */ at?: string; sprint?: string }) {
   // The board's own state (lane, folds, scroll) restarts with the board it shows, never with the item a sheet is open on:
   // the bare `work` address and the default board's own address are the same board.
   // The key falls back to the early guess, so it does not change when the list confirms it (a remount would fetch twice).
@@ -124,7 +110,7 @@ export default function Board(props: { project?: string; focus?: string; sprint?
   return <BoardView key={props.project === 'all' ? 'all' : project ?? early ?? ''} {...props} />
 }
 
-function BoardView({ project: wanted, focus, sprint }: { project?: string; focus?: string; sprint?: string }) {
+function BoardView({ project: wanted, focus, at, sprint }: { project?: string; focus?: string; at?: string; sprint?: string }) {
   const all = wanted === 'all'
   const { list, project: chosen, early, loading: listing, error: listError } = useProject(all ? undefined : wanted)
   const project = all ? undefined : chosen
@@ -138,7 +124,8 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
   // A failed load of a new sprint shows the error and no lanes, not the old sprint's.
   const workData = read.data ?? (read.error ? null : last)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-  const [picked, setPicked] = useState<WorkLane | null>(null)
+  // Kept against this entry, so Back from a screen a window's link went to finds the lane the person had.
+  const [picked, setPicked] = useEntryMemo<WorkLane | null>('work-lane', null)
   // Read in the initializer: the board re-mounts per project and must not fall back to the default.
   const [filter, setFilter] = useState<WorkFilter>(savedFilter)
   const change = (next: Partial<WorkFilter>) => { setFilter(value => ({ ...value, ...next })); setPicked(null) }
@@ -175,7 +162,9 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
       setPages(value => ({ ...value, [lane]: [...(value[lane] ?? []), ...page.cards] }))
     } catch (failure) { setPageError(failure instanceof Error ? failure.message : 'It did not load.') } finally { setPaging(null) }
   }
-  const focusKey = focus ? `bead:${focus}` : undefined
+  // The card to mark: the one whose window is open, else the one an `at` address names.
+  const marked = focus ?? at
+  const focusKey = marked ? `bead:${marked}` : undefined
   // The lanes the board shows. A focused card always passes, so a link to a bead never opens on a hidden card. `focusLane` and `focusCard` read `data.lanes`.
   const shownLanes = useMemo(() => {
     if (!data || !filtering) return data?.lanes
@@ -206,6 +195,8 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
   const sheetFound = !!(focus && sheetMap.model && find(sheetMap.model, focus))
   // Nothing to open a sheet for: the board lacks the id and so does the map (or there is no project to ask).
   const unknown = !!(focus && data && !focusLane && (!sheetOf || (sheetMap.model && !sheetFound)))
+  // An `at` address to a bead the board lacks (closed long ago, a group, in another project, or outside the sprint).
+  const missingAt = !!(at && !focus && data && !focusLane)
   const pushed = useRef(false)
   const lastFocus = useRef<string | null>(null)
   const boardHash = withScope(hubHash('work', board), { sprint })
@@ -305,7 +296,7 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
       {!listing && !listError && !project && !all && <p className="hub-empty">No projects yet. A project appears once an agent session pushes a Beads copy or writes to the Hub.</p>}
       {listError && <p className="hub-error" role="alert">{listError}</p>}
       {!listError && <RefreshNote error={read.error} hasData={!!read.data} at={read.at} />}
-      {data && unknown && <p className="hub-muted" role="status" data-board-note>{focus} is not on the board: it may be closed long ago, a group, or in another project.</p>}
+      {data && (unknown || missingAt) && <p className="hub-muted" role="status" data-board-note>{focus ?? at} is not on the board: it may be closed long ago, a group, or in another project{sprint ? ', or not in this sprint' : ''}.</p>}
       {data && (
         <>
           <div className="wk-lane-chips" role="group" aria-label="Lane">
@@ -325,7 +316,7 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
               return (
                 <section key={lane} className="wk-lane" data-lane={lane} aria-label={label}>
                   <h3>{label} <span>{laneCount(lane)}</span></h3>
-                  {shown.map(card => <Card key={card.key} card={card} href={card.source === 'beads' ? workHash(board, card.id, sprint) : card.href} showProject={all} projectName={nameOf(card.project)} focused={card.key === focusKey} onSheet={openFromCard} q={filter.q} row={rowOf.get(`${card.project}/${card.id}`)} />)}
+                  {shown.map(card => <Card key={card.key} card={card} href={card.source === 'beads' ? workHash(board, card.id, sprint) : card.href} showProject={all} projectName={nameOf(card.project)} focused={card.key === focusKey} sheetOpen={!!focus} onSheet={openFromCard} q={filter.q} row={rowOf.get(`${card.project}/${card.id}`)} />)}
                   {!cards.length && <p className="hub-empty">{filtering ? 'No match' : 'Nothing here.'}</p>}
                   {collapsible && (
                     <button type="button" className="hub-btn wk-more" onClick={() => setExpanded(value => ({ ...value, [lane]: !value[lane] }))}>
@@ -373,13 +364,9 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
           </div>
         </Dialog>
       )}
-      {focus && !unknown && (
-        <div className="wk-sheet">
-          {sheetMap.model && sheetFound
-            ? <MapPanel model={sheetMap.model} nodeId={focus} onClose={closeSheet} onOpen={openRelated} headerExtra={<p className="hub-map-panel-roadmap"><a href={mapHash(sheetMap.model.project, focus, sprint)} data-show-on-roadmap>Show on roadmap</a></p>} />
-            : <SheetWaiting error={sheetMap.model ? 'The roadmap does not have this item.' : sheetMap.error} onClose={closeSheet} />}
-        </div>
-      )}
+      {focus && !unknown && (sheetMap.model && sheetFound
+        ? <MapPanel model={sheetMap.model} nodeId={focus} board={board} onClose={closeSheet} onOpen={openRelated} />
+        : <SheetWaiting error={sheetMap.model ? 'The roadmap does not have this item.' : sheetMap.error} onClose={closeSheet} />)}
     </div>
   )
 }

@@ -11,7 +11,7 @@ import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
 import { startFakeS3 } from '../../site/api/test/fake-s3.mjs';
 import { startFakeHermes } from '../../site/api/test/fake-hermes.mjs';
-import { askJson, beadsIssue, checklistJson, cujTwo, eventJson, iso, minutesAgo, pcStatusJson, agentConfigJson, seedAgentConfig, requestJson, seedPcStatus, seeder, teamSheet, plainOptions, threeOptions, workFixture } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, beadsIssue, checklistJson, cujTwo, eventJson, iso, minutesAgo, pcStatusJson, agentConfigJson, hostSchedulesJson, pcSchedules, seedAgentConfig, requestJson, seedPcStatus, seeder, teamSheet, plainOptions, threeOptions, workFixture } from '../../site/api/test/hub-fixtures.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const FIXTURE_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-jump-arc-a1b2`;
@@ -39,7 +39,7 @@ const HOGS = [
   { name: 'node.exe', cmd: 'node -e "while (1) {}"', cores: 1.0, minutes: 4, orphan: false, ramMB: 40, action: 'stopped' },
 ];
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, thirdSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSprint = false, workSide = false, workSearch = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, thirdSection = false, pc = false, agentConfig = false, otherSchedules = false, oldSessions = false, heartbeat = false, work = false, workSprint = false, workSide = false, workSearch = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -177,7 +177,18 @@ A long list.
     const soulText = ['## Role', 'You are the owner\'s assistant.', 'Always answer in plain words.', 'Key for tests: sk-ant-api03-FAKEFAKEFAKEFAKE1234567890', ''].join('\n');
     const model = (provider, name) => ({ provider, model: name });
     const modelOptions = { main: [model('openai-codex', 'gpt-6-sol'), model('anthropic', 'claude-sonnet-5-5'), model('anthropic', 'claude-haiku-5-5'), model('deepseek', 'deepseek-v4-pro'), model('deepseek', 'deepseek-flash')], briefs: [model('anthropic', 'claude-sonnet-5-5'), model('anthropic', 'claude-haiku-5-5'), model('deepseek', 'deepseek-v4-pro'), model('deepseek', 'deepseek-flash')] };
-    seedAgentConfig(fake, agentConfigJson({ now, exportedMinutesAgo: agentConfig === 'stale' ? 9 * 60 : 12, soulText, modelOptions }));
+    // 'schedules' and 'schedules-stale' add the fields of ws-eh2: four made-up jobs with every setting, two host timers and a timezone.
+    const old = agentConfig === 'stale' || agentConfig === 'schedules-stale';
+    seedAgentConfig(fake, agentConfigJson({ now, exportedMinutesAgo: old ? 9 * 60 : 12, soulText, modelOptions, schedules: String(agentConfig).startsWith('schedules') }));
+  }
+
+  if (otherSchedules) {
+    // Off by default; 'fresh' or 'old' (the PC's lists 4 hours old, the site host's file 3 hours). The PC's status carries the `schedules` field of ws-eh2 D and
+    // the site host's timer file sits beside a (missing) env file, which is how the Hub finds it. Without this the PC reports no field and there is no file.
+    const old = otherSchedules === 'old';
+    seedPcStatus(fake, pcStatusJson({ now, minutesOld: 1, extra: { schedules: pcSchedules({ now, minutesOld: old ? 4 * 60 : 5 }) } }));
+    await writeFile(path.join(base, 'host-schedules.json'), JSON.stringify(hostSchedulesJson({ now, minutesOld: old ? 3 * 60 : 6 })));
+    env = { BUW_ENV_FILE: path.join(base, 'api.env'), ...env };
   }
 
   if (oldSessions) {

@@ -260,7 +260,7 @@ test('inbox: answers, snoozes and declines are the Hub\'s, so a limited writer i
   const { fake, call } = await setup();
   try {
     const put = (token, file) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{}'), base64: true });
-    for (const file of ['asks/x-1/answer.json', 'asks/x-1/answer.png', 'asks/x-1/snooze.json', 'requests/r-1/declined.json']) {
+    for (const file of ['asks/x-1/answer.json', 'asks/x-1/answer.png', 'asks/x-1/answer.pic-20261106T101112123Z-ab12.jpg', 'asks/x-1/snooze.json', 'requests/r-1/declined.json']) {
       const refused = await put('tok-cloud', file);
       assert.equal(refused.status, 403, file);
       assert.equal(refused.data.error, 'Only the Hub writes answers.');
@@ -374,6 +374,7 @@ test("inbox: the owner's Not useful record is the Hub's; an agent may only add a
     assert.equal(fake.text(`sections/inbox/${base}/not-useful.json`), null, 'nothing was written');
     // Any other name under feedback/ is refused to a limited writer.
     assert.equal((await put('tok-cloud', 'notes.json')).status, 403);
+    assert.equal((await put('tok-cloud', 'picture-1.jpg')).status, 403, 'A picture beside a Not useful record is refused too.');
     assert.equal((await put('tok-cloud', 'filed-20261030T110000000Z-ab12.json.bak')).status, 403);
     assert.equal((await call('PUT', '/sections/inbox/files/feedback/probe/not-useful.json', { token: 'tok-cloud', body: Buffer.from('{}'), base64: true, headers: noIf })).status, 403, 'a shallower path');
     // The filed note: create-only, once, never by upload URL.
@@ -518,7 +519,7 @@ test('inbox: a checklist is written once by an agent; ticks and the submission a
   try {
     const folder = 'checklists/20261027-probe-x-a1b2';
     const put = (token, file, headers = {}, text = '{}') => call('PUT', `/sections/inbox/files/${folder}/${file}`, { token, body: Buffer.from(text), base64: true, headers });
-    const owned = ['tick-01-20261027T143012123Z-a1b2.json', 'untick-01-20261027T143012123Z-a1b2.json', 'submit.json', 'evidence-01-20261027T143012123Z-a1b2.png', 'evidence-01-20261027T143012123Z-a1b2.jpg', 'shot-20261027T143012123Z-a1b2.png'];
+    const owned = ['tick-01-20261027T143012123Z-a1b2.json', 'untick-01-20261027T143012123Z-a1b2.json', 'submit.json', 'evidence-01-20261027T143012123Z-a1b2.png', 'evidence-01-20261027T143012123Z-a1b2.jpg', 'shot-20261027T143012123Z-a1b2.png', 'shot-note-20261027T143012123Z-a1b2.png'];
     for (const file of owned) {
       for (const token of ['tok-cloud', 'tok-hermes']) {
         const refused = await put(token, file, { 'If-None-Match': '*' });

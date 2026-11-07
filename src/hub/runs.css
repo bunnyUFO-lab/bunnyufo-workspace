@@ -162,3 +162,13 @@
 .ref-note { display: flex; align-items: flex-start; gap: 12px; margin: 6px 0; }
 .ref-thumb { max-width: 160px; max-height: 120px; border-radius: 8px; display: block; }
 .ref-from { margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.rd-openrun { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rd-openrun p { margin: 0; overflow-wrap: anywhere; }
+.rd-openrun .hub-code { margin: 0; }
+.rd-openrun .hub-code pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .rd-openrun .hub-code { flex-direction: column; align-items: stretch; }
+  .rd-openrun .hub-code pre { flex: none; }
+  .rd-openrun .hub-copy { order: -1; max-width: none; width: 100%; }
+}

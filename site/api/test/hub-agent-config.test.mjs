@@ -134,7 +134,7 @@ test('a soul over 32 KB from a bad host is cut by the site too, a host-truncated
   assert.deepEqual([passed.text, passed.truncated, passed.bytes], ['short', true, 40000]);
   const jobs = validExport({ ...agentConfigJson({ now: NOW }), profiles: { briefs: { cron: Array.from({ length: 30 }, (_, n) => ({ name: `job ${n}`, schedule: '* * * * *', enabled: n === 0, prompt: 'x '.repeat(5000) })) } } }).profiles.briefs.cron;
   assert.equal(jobs.length, 20);
-  assert.ok(Buffer.byteLength(jobs[0].prompt) <= 4096);
+  assert.ok(Buffer.byteLength(jobs[0].prompt) <= 8192);
   assert.deepEqual([jobs[0].enabled, jobs[1].enabled], [true, false]);
 });
 

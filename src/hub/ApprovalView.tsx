@@ -19,6 +19,7 @@ import './runs.css'
 import { PageProjectChip } from './ProjectChip'
 import ReferenceNote from './ReferenceNote'
 import type { JobReference } from './ReferenceNote'
+import { usePcStart } from './usePcStart'
 
 /** The parts of `GET /hub/requests/:id` this view reads. */
 export interface RequestDetail {
@@ -88,6 +89,7 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
   const proposed = (request.target ?? route?.target ?? preset.targets[0]) as SpawnTarget
   const target: SpawnTarget = choice || (state === 'expired' ? detail.approved?.target : undefined) || proposed
   const atPc = target === 'at-pc'
+  const pcStart = usePcStart(request.project, target === 'pc')
   const machine = MACHINE[target]
   const why = choice ? 'you chose it' : route && route.target === target ? route.why : request.target === target ? 'proposed with the request' : ''
   const expired = state === 'expired'
@@ -158,7 +160,7 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
         </dd></div>
         <div><dt>Side effects</dt><dd data-approval-effect>{sideEffect(preset, request.repo)}</dd></div>
         <div><dt>Time limit</dt><dd>Up to {detail.approved?.limits?.minutes ?? preset.minutes} minutes</dd></div>
-        <div><dt>Starts</dt><dd data-approval-starts>{STARTS[target]}</dd></div>
+        <div><dt>Starts</dt><dd data-approval-starts data-approval-blocked={pcStart?.state === 'blocked' ? pcStart.cause : undefined}>{target === 'pc' && pcStart?.state === 'blocked' && pcStart.short ? pcStart.short : STARTS[target]}</dd></div>
       </dl>
       {expired && <p className="hub-muted" data-approval-expired>The approval ran out{detail.approved?.expires ? ` ${ago(detail.approved.expires)}` : ''}. Approve it again to start it.</p>}
       {error && <p className="hub-error" role="alert" data-approval-error>{error}</p>}
@@ -166,6 +168,9 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
         <label className="hub-field" data-approval-decline-box>Why? (optional)
           <input value={reason} onChange={event => setReason(event.target.value)} maxLength={400} autoComplete="off" data-approval-reason />
         </label>
+      )}
+      {host.write && declining && (
+        <p className="hub-muted" data-approval-no-pictures>A declined request has no run to read a picture.</p>
       )}
       {brief && <pre className="ni-mono" data-approval-brief>{brief}</pre>}
       <div className="ni-a ap-actions" data-approval-actions>

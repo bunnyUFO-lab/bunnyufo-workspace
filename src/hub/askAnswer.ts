@@ -5,6 +5,13 @@ import { authHeaders } from '../local/client'
 import type { DrawingIo } from '../components/DrawingEditor'
 import { annotationScene, blankScene, takeHandoff } from './drawing'
 import { KEEPALIVE_LIMIT, bodyBytes, heldDraft, hold } from './heldSend'
+import { toBase64 } from './chatImages'
+import { usePictures } from './pictures'
+
+/** Pictures with an answer: at most this many. */
+export const ANSWER_PICTURES = 4
+/** Whether an Ask takes pictures with its answer: a note or a drawing to put them beside, and nothing the Hub acts on by itself (rerun, edit of an agent, avatar, change list). */
+export const takesPictures = (ask: Ask) => (ask.allowNote || ask.allowDrawing === true) && !ask.rerun && !ask.agentEdit && !ask.avatar && !(Array.isArray(ask.changes) && ask.changes.length > 0)
 
 export interface Attached { scene: string; png: string; optionId: string | null }
 export interface Editing { optionId: string | null; image?: string; w: number; h: number; scene?: string }
@@ -79,6 +86,21 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({})
 
   const askId = ask.id
+  const base = `/asks/${encodeURIComponent(askId)}`
+  const pictureable = takesPictures(ask)
+  // Saved when picked, so the answer names a few files, Undo keeps working and a reload keeps the tray.
+  const pictures = usePictures({
+    max: ANSWER_PICTURES, noun: 'An answer', stored: pictureable ? ask.pendingPictures : undefined, pathOf: name => `asks/${askId}/${name}`,
+    store: async picture => {
+      try {
+        return (await hubPost<{ file: string }>(`${base}/files`, { image: { type: picture.type, data: await toBase64(picture.blob) } }, undefined, true)).file
+      } catch (failure) {
+        if (failure instanceof HubError && failure.status === 409) reload()
+        throw failure
+      }
+    },
+    discard: async name => { await hubPost(`${base}/files/${encodeURIComponent(name)}/delete`, {}, undefined, true) },
+  })
   const decisions = decisionList(ask)
   const kind = designKind(ask)
   const needsOption = optionList(ask).length > 0
@@ -119,12 +141,11 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
     }
   }
 
-  const base = `/asks/${encodeURIComponent(askId)}`
   const sentDecisions = () => Object.fromEntries(decisions.map(item => {
     const given = verdicts[item.id]
     return [item.id, { verdict: given.verdict, ...(given.verdict === 'change' && given.note.trim() ? { note: given.note.trim() } : {}) }]
   }))
-  const answerBody = () => ({ ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}), ...(help ? { help } : {}), ...(ask.rev ? { rev: ask.rev } : {}) })
+  const answerBody = () => ({ ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}), ...(pictureable && pictures.files().length ? { pictures: pictures.files() } : {}), ...(help ? { help } : {}), ...(ask.rev ? { rev: ask.rev } : {}) })
   // An answer that starts work or changes something says so when it lands (the notice), and a passkey-only Ask is the owner's check in the moment:
   // those go at once. Everything else waits seven seconds with Undo.
   const holdable = ask.requirePasskey !== true && !ask.rerun && !ask.agentEdit && !ask.avatar
@@ -151,11 +172,11 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
     verdicts, kind, decisions,
     setVerdict: (decision: string, verdict: DecisionVerdict) => setVerdicts(previous => ({ ...previous, [decision]: { verdict, note: previous[decision]?.note ?? '' } })),
     setVerdictNote: (decision: string, text: string) => setVerdicts(previous => (previous[decision] ? { ...previous, [decision]: { ...previous[decision], note: text } } : previous)),
-    choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, bigConfirm, setBigConfirm, drawing, setDrawing, editing, setEditing, sizes, setSizes, io,
+    pictures, pictureable, choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, bigConfirm, setBigConfirm, drawing, setDrawing, editing, setEditing, sizes, setSizes, io,
     // A review is ready when every decision has a verdict, a pick when one option is chosen, anything else when it says something.
     // An Ask with options needs one of them picked, whatever else it asks for.
     needsOption,
-    ready: (!needsOption || !!choice) && (decisions.length ? decisions.every(item => !!verdicts[item.id]) : kind === 'pick' ? !!choice : !!choice || note.trim().length > 0 || !!drawing),
+    ready: pictures.ready && (!needsOption || !!choice) && (decisions.length ? decisions.every(item => !!verdicts[item.id]) : kind === 'pick' ? !!choice : !!choice || note.trim().length > 0 || !!drawing || (pictureable && pictures.files().length > 0)),
     send, sendNow,
     snooze: () => act(() => hubPost(`${base}/snooze`, { hours: 24 }), 'snoozed'),
     cancel: () => act(() => hubPost(`${base}/cancel`), 'cancelled'),
