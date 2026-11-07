@@ -82,7 +82,10 @@ skill write it there.
 
 Each card in the home grid has an **archive** button next to its status dot. Archived cards
 gather in an **archive** section at the foot of the grid and of the menu, folded shut and
-counted in its heading. **restore** brings a card back and dates it today. Every section
+counted in its heading. **restore** brings a card back and dates it today. Only a report or a done card moves to the
+archive by itself, 7 days after its last change; a card can say what it is for with `purpose`
+(`report` or `reference`), and **Keep as reference** and **Treat as report** in a row's menu choose it
+by hand ([workspaces](workspaces.md)). Every section
 heading folds its section away, and stays folded in this browser until you open it again.
 
 Pinned, archived, tags and the order of the pinned list are **card state**, not card content:
