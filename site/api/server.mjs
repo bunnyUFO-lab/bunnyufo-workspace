@@ -26,12 +26,15 @@ import { Readable, pipeline } from 'node:stream';
 import path from 'node:path';
 import { createBucketCardStore, createCardStore, validEmoji } from './card-state.mjs';
 import { bucketStore, cardRoute, cardWriter } from './card-writes.mjs';
-import { contentTypeOf } from './s3.mjs';
+import { typeOf } from './s3.mjs';
 import { isLiveCard } from './card-liveness.mjs';
 
 const STATUSES = ['active', 'archived'];
 const RESERVED = new Set(['_app', '_retired', '_index', 'site', 'api', 'w', 'template', 'sections', 'state', 'today', 'inbox', 'board', 'map', 'chat', 'hub', 'inbox-dev']);
 const SECTIONS_TTL = 15_000;
+/** Added to every /w/ ETag. A browser keeps the type of its cached copy across a 304, so a file once served with the wrong
+ * type stays wrong until its ETag changes. Bump this to make every browser fetch the files again. */
+const TYPE_ETAG_SUFFIX = '-t1';
 
 const json = (response, status, body) => {
   const text = JSON.stringify(body);
@@ -76,6 +79,9 @@ function cleanPath(value) {
   if (!parts.length || parts.some(part => part === '.' || part === '..' || part.startsWith('.'))) return null;
   return parts.join('/');
 }
+
+/** The inbox, hidden sections and saved card answers hold data: the signed-in app reads them through the Hub, so /w/ never serves them. */
+const isDataPath = (section, clean) => section.hidden === true || /^inbox(-|$)/.test(section.id) || clean.split('/')[0] === 'card-responses';
 
 /**
  * @param bucket      an s3.mjs bucket, or null: without one the service answers read-only, with a reason.
@@ -191,7 +197,7 @@ export function createSiteApi({
         name: typeof got.value.name === 'string' && got.value.name.trim() ? got.value.name.trim() : titleCase(id),
         base: `/w/${id}`,
         publishedAt: got.lastModified ? new Date(got.lastModified).toISOString() : undefined,
-        // A hidden section holds data (inbox, events), not cards: it is served, but the UI never lists it.
+        // A hidden section holds data (inbox, events), not cards: it is not served as files and the UI never lists it.
         ...(got.value.hidden === true ? { hidden: true } : {}),
         // An archived workspace is put away, not deleted: its files and cards stay, the lists leave it out.
         ...(got.value.archived === true ? { archived: true } : {}),
@@ -265,22 +271,26 @@ export function createSiteApi({
   async function serve(request, response, id, file, { sandboxed = false } = {}) {
     const clean = cleanPath(file);
     if (!clean) throw Object.assign(new Error('Not found'), { status: 404 });
-    await findSection(id);
+    const section = await findSection(id);
+    if (isDataPath(section, clean)) throw Object.assign(new Error('Not found'), { status: 404 });
     let object;
     try {
-      object = await bucket.get(keyOf(id, clean), { ifNoneMatch: request.headers['if-none-match']?.replace(/^"|"$/g, '') });
+      // Only a validator this server issued (with the suffix) may become a 304; an older one gets the full answer.
+      const sent = request.headers['if-none-match']?.replace(/^"|"$/g, '');
+      const ifNoneMatch = sent?.endsWith(TYPE_ETAG_SUFFIX) ? sent.slice(0, -TYPE_ETAG_SUFFIX.length) : undefined;
+      object = await bucket.get(keyOf(id, clean), { ifNoneMatch });
     } catch (error) {
       if (error.status === 404) throw Object.assign(new Error('Not found'), { status: 404 });
       throw Object.assign(new Error(`The cards bucket did not answer: ${error.message}`), { status: 502 });
     }
     const headers = {
-      'Content-Type': object.contentType || contentTypeOf(clean),
+      'Content-Type': typeOf(object.contentType, clean),
       'Cache-Control': 'no-cache',
       'X-Content-Type-Options': 'nosniff',
       // With a content host, a /w/ file the app host still serves (a frame request an old browser sent without
       // Sec-Fetch-Dest, a cached copy) may not be framed by another origin: that would run it as the app.
       ...(sandboxed ? { 'Content-Security-Policy': CONTENT_CSP } : contentHost ? { 'Content-Security-Policy': "frame-ancestors 'self'" } : {}),
-      ...(object.etag ? { ETag: `"${object.etag}"` } : {}),
+      ...(object.etag ? { ETag: `"${object.etag}${TYPE_ETAG_SUFFIX}"` } : {}),
       ...(object.lastModified ? { 'Last-Modified': object.lastModified } : {}),
     };
     if (object.status === 304) {

@@ -3,6 +3,7 @@ import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { remarkBreaks } from './chatText'
 import { copyText } from './copyText'
+import { cardLinkOf } from './cardLink'
 
 type CopyState = 'idle' | 'copied' | 'oneLine' | 'manual'
 
@@ -55,22 +56,34 @@ export function CodeBlock({ children, exact = false }: { children?: ReactNode; e
  * react-markdown's default URL transform, which drops javascript: links. Links open in a new tab
  * unless they point at this site, which `onSameOrigin` may handle in-app. With `copy`, each fenced code block
  * (not inline code) gets a Copy button; other screens leave it off. With `breaks`, a newline inside a paragraph is a
- * line break, as chat apps show replies.
+ * line break, as chat apps show replies. With `cardButtons`, a link to a card on this site becomes an "Open card" button
+ * that opens the card in a new tab.
  */
-export default function Md({ text, onSameOrigin, copy = false, breaks = false }: { text: string; onSameOrigin?: (url: URL) => void; copy?: boolean; breaks?: boolean }) {
+export default function Md({ text, onSameOrigin, copy = false, breaks = false, cardButtons = false }: { text: string; onSameOrigin?: (url: URL) => void; copy?: boolean; breaks?: boolean; cardButtons?: boolean }) {
   return (
     <div className="hub-md">
       <SameOrigin.Provider value={onSameOrigin}>
-        <Markdown remarkPlugins={breaks ? GFM_BREAKS : GFM} components={copy ? WITH_COPY : PLAIN}>{text}</Markdown>
+        <CardButtons.Provider value={cardButtons}>
+          <Markdown remarkPlugins={breaks ? GFM_BREAKS : GFM} components={copy ? WITH_COPY : PLAIN}>{text}</Markdown>
+        </CardButtons.Provider>
       </SameOrigin.Provider>
     </div>
   )
 }
 
 const SameOrigin = createContext<((url: URL) => void) | undefined>(undefined)
+const CardButtons = createContext(false)
 
 function Link({ href, children }: { href?: string; children?: ReactNode }) {
   const onSameOrigin = useContext(SameOrigin)
+  const cardButtons = useContext(CardButtons)
+  const card = cardButtons ? cardLinkOf(href, window.location.href) : null
+  if (card && href) {
+    // The label always starts "Open card:", so link text from a model cannot paint a button that says something else.
+    const own = typeof children === 'string' ? children.trim() : Array.isArray(children) && children.every(child => typeof child === 'string') ? children.join('').trim() : ''
+    const label = own && own !== href && own !== card.href ? own : card.card
+    return <a className="hub-btn hub-card-open" href={card.href} target="_blank" rel="noopener noreferrer" data-card-link>Open card: {label}</a>
+  }
   let url: URL | null = null
   try { url = href ? new URL(href, window.location.href) : null } catch { url = null }
   const same = !!url && url.origin === window.location.origin

@@ -15,8 +15,10 @@ const fresh = await startHubFixture({ pc: 'fresh', hermes: true, agentConfig: 'f
 const stale = await startHubFixture({ agentConfig: 'stale' });
 const bare = await startHubFixture({});
 const withPlugins = startHubFixture({ pc: 'fresh', hermes: true });
+const withBig = startHubFixture({ pc: 'fresh', hermes: true });
 const slash = await withSlash;
 const plugged = await withPlugins;
+const big = await withBig;
 seedAgentConfig(slash.fake, agentConfigJson({ now: new Date(), extraProfile: { skills: { autoLoad: [], installed: ['games/wall-jump', 'brief-writer'] } } }));
 // An export with plugins (on for one profile, off for the other) and skills in folders.
 const pluggedDoc = agentConfigJson({ now: new Date() });
@@ -27,6 +29,28 @@ pluggedDoc.profiles.main.plugins = [
 ];
 pluggedDoc.profiles.briefs.plugins = [{ name: 'disk-cleanup', status: 'disabled', version: '2.0.0', source: 'bundled', description: 'Clean up temp files.' }];
 seedAgentConfig(plugged.fake, pluggedDoc);
+// A long list, made up: 53 skills in seven folders and a loose few. Hermes and Briefs are two profiles with the same list but a
+// different auto-load and different plugins, so the page must show them as one group and say only what differs.
+const folders = {
+  creative: ['draw', 'paint', 'pixel-art', 'sketch', 'storyboard', 'palette', 'mood-board'],
+  research: ['dig', 'scan', 'read-card', 'cite', 'compare', 'summarize'],
+  games: ['wall-jump', 'level-pass', 'balance-sheet', 'juice', 'playtest', 'save-slots', 'bug-triage'],
+  dev: ['plan', 'review', 'refactor', 'profile', 'bisect', 'release', 'triage', 'docs'],
+  ops: ['backup', 'rotate-logs', 'check-disk', 'restart', 'status', 'cleanup'],
+  writing: ['simplify-text', 'release-notes', 'changelog', 'blog-post', 'faq', 'tone-check'],
+  data: ['export', 'chart', 'dedupe', 'join', 'sample'],
+};
+const loose = ['brief-writer', 'spend-digest', 'inbox-zero', 'daily-plan', 'standup', 'retro', 'focus-timer', 'notes-merge'];
+const everySkill = [...Object.entries(folders).flatMap(([folder, names]) => names.map(name => `${folder}/${name}`)), ...loose];
+assert.equal(everySkill.length, 53);
+const plugin = (name, status) => ({ name, status, version: '1.0.0', source: 'bundled', description: `Made-up plugin ${name}.` });
+const bigDoc = agentConfigJson({ now: new Date() });
+bigDoc.profiles.main.skills = { autoLoad: ['writing/simplify-text', 'brief-writer'], installed: everySkill };
+bigDoc.profiles.briefs.skills = { autoLoad: ['writing/simplify-text'], installed: [...everySkill].reverse() };
+bigDoc.profiles.main.plugins = [plugin('disk-cleanup', 'enabled'), plugin('chronos', 'enabled'), plugin('tidy-notes', 'enabled'), plugin('link-check', 'enabled'), plugin('spell-pass', 'not enabled'), plugin('page-snap', 'not enabled')];
+bigDoc.profiles.briefs.plugins = [plugin('disk-cleanup', 'disabled'), plugin('chronos', 'enabled'), plugin('tidy-notes', 'enabled'), plugin('link-check', 'enabled'), plugin('spell-pass', 'not enabled'), plugin('page-snap', 'not enabled')];
+bigDoc.ownerSkills = ['writing/simplify-text', 'brief-writer'];
+seedAgentConfig(big.fake, bigDoc);
 await new Promise(resolve => setTimeout(resolve, 150));
 
 const browser = await chromium.launch({ headless: true, channel });
@@ -39,9 +63,14 @@ const open = async (viewport, options = {}) => {
   page.on('pageerror', error => { throw error; });
   return page;
 };
+// The document and every pane. The document alone missed the search overlap: the list pane scrolled sideways inside itself.
 const noSideways = async (page, what) => {
-  const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
+  const widths = await page.evaluate(() => ({
+    scroll: document.scrollingElement.scrollWidth, inner: innerWidth,
+    panes: [...document.querySelectorAll('.ui-pane')].filter(pane => pane.offsetParent !== null).map(pane => ({ name: pane.className, scroll: pane.scrollWidth, client: pane.clientWidth })),
+  }));
   assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
+  for (const pane of widths.panes) assert.ok(pane.scroll <= pane.client, `${what}: the pane "${pane.name}" scrolls sideways (${pane.scroll} > ${pane.client}).`);
 };
 const hashOf = page => page.evaluate(() => location.hash);
 const skillsList = async (page, url) => {
@@ -84,17 +113,17 @@ try {
   await phone.locator('[data-agent-group]').first().waitFor();
   assert.equal(await hashOf(phone), '#/~hub/team/skills');
   assert.equal(await phone.evaluate(() => history.length), before + 1, 'One step into Skills and plugins.');
-  assert.deepEqual(await phone.locator('[data-agent-group]').evaluateAll(list => list.map(item => item.getAttribute('data-agent-group'))), ['profile:main', 'profile:briefs', 'agent:claude']);
+  assert.deepEqual(await phone.locator('[data-agent-group]').evaluateAll(list => list.map(item => item.getAttribute('data-agent-group'))), ['profile:main', 'agent:claude'], 'Hermes and Briefs have one list, so they are one group.');
   assert.equal(await phone.getByRole('button', { name: 'By agent' }).getAttribute('aria-pressed'), 'true', 'By agent is the default.');
   const main = phone.locator('[data-agent-group="profile:main"]');
-  assert.match(flat(await main.locator('[data-group-shared]').innerText()), /^Hermes, .* and Planner share one list\. 3 skills\.$/);
+  assert.match(flat(await main.locator('[data-group-shared]').innerText()), /^Hermes, .*Planner.* and Briefs have the same skills\. 3 skills\.$/);
   assert.deepEqual(await main.locator('[data-skill]').evaluateAll(list => list.map(row => row.getAttribute('data-skill'))), ['brief-writer', 'simplify-text', 'spend-digest']);
   assert.match(flat(await main.locator('[data-skill="simplify-text"]').innerText()), /Every reply/);
   assert.match(flat(await main.locator('[data-skill="simplify-text"]').innerText()), /Yours/);
   assert.doesNotMatch(flat(await main.locator('[data-skill="spend-digest"]').innerText()), /Every reply/);
   assert.match(flat(await main.locator('[data-skill="spend-digest"]').innerText()), /Yours/);
   assert.doesNotMatch(flat(await main.locator('[data-skill="brief-writer"]').innerText()), /Every reply|Yours/);
-  assert.equal(await phone.locator('[data-agent-group="profile:briefs"] [data-group-shared]').count(), 0, 'Briefs shares with nobody, so no line says so.');
+  assert.equal(await main.locator('[data-tag-only]').count(), 0, 'Both profiles load simplify-text, so no line says only some do.');
   assert.match(flat(await phone.locator('[data-agent-group="agent:claude"] [data-group-unknown]').innerText()), /Claude Code's plugins and skills live on the PC/);
   assert.equal(await phone.locator('[role="switch"], input[type="checkbox"]').count(), 0, 'No switch anywhere: nothing holds one list of who can use what.');
   assert.equal(flat(await phone.locator('[data-plugins-line]').innerText()), "Claude Code's plugins and skills live on the PC. The Hub has no list of them.");
@@ -104,14 +133,16 @@ try {
   assert.match(await phone.locator('[data-skills-freshness]').getAttribute('data-skills-freshness'), /fresh/);
   assert.match(flat(await phone.locator('[data-skills-freshness]').innerText()), /^Read from the Hermes host 12 min ago\.$/);
   await noSideways(phone, 'Skills by agent at 390');
-  for (const target of await phone.locator('[data-skill], [data-team-tab], [data-skills-by] button, [data-skills-search]').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A row, a tab or the search is ${target} px high.`);
+  for (const target of await phone.locator('[data-skill], [data-team-tab], .tk-tools button, [data-skills-search]').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A row, a tab or the search is ${target} px high.`);
 
   step('390: the search narrows every group; By skill is a switch with no back step, remembered');
   await phone.locator('[data-skills-search]').fill('spend');
-  assert.deepEqual(await phone.locator('[data-skill]').evaluateAll(list => list.map(row => row.getAttribute('data-skill'))), ['spend-digest', 'spend-digest']);
+  assert.deepEqual(await phone.locator('[data-skill]').evaluateAll(list => list.map(row => row.getAttribute('data-skill'))), ['spend-digest'], 'Hermes and Briefs are one group, so one row.');
+  assert.equal(flat(await phone.locator('[data-skills-found]').innerText()), '1 skill');
   await phone.locator('[data-skills-search]').fill('zzz');
   assert.equal(await phone.locator('[data-skill]').count(), 0);
-  assert.equal(await phone.locator('[data-group-none]').count(), 2, 'Each Hermes group says nothing matches.');
+  assert.equal(await phone.locator('[data-group-none]').count(), 1, 'The Hermes group says nothing matches.');
+  assert.equal(flat(await phone.locator('[data-skills-found]').innerText()), 'No match');
   await phone.locator('[data-skills-search]').fill('');
   const flipped = await phone.evaluate(() => history.length);
   await phone.getByRole('button', { name: 'By skill' }).tap();
@@ -120,6 +151,9 @@ try {
   assert.equal(await hashOf(phone), '#/~hub/team/skills');
   assert.equal(await phone.evaluate(() => localStorage.getItem('hub.team.skillsBy')), 'skill');
   assert.deepEqual(await phone.locator('[data-skill]').evaluateAll(list => list.map(row => row.getAttribute('data-skill'))), ['brief-writer', 'simplify-text', 'spend-digest']);
+  const rowText = flat(await phone.locator('[data-skill="spend-digest"]').innerText());
+  assert.match(rowText, /^spend-digest .*agents with a list/, 'A By skill row names who has it.');
+  assert.doesNotMatch(rowText, /installed|agents ·/);
   await phone.locator('[data-skills-search]').fill('brief');
   assert.equal(await phone.locator('[data-skill]').count(), 1);
   await phone.locator('[data-skills-search]').fill('');
@@ -166,7 +200,7 @@ try {
   await phone.locator('[data-can-use]').first().waitFor();
   await noSideways(phone, 'Agent page at 320');
 
-  step('1280: by agent fills the pane with the groups side by side; by skill has the list and the first skill open; Floor is the default');
+  step('1280: by agent fills the pane with the groups stacked; by skill has the list and the first skill open; Floor is the default');
   const desk = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
   await skillsList(desk, fresh.url);
   assert.equal(await desk.locator('[data-skill-page]').count(), 0, 'By agent has no page beside it.');
@@ -175,8 +209,8 @@ try {
   const shown = await desk.locator('[data-skills-by="agent"]').boundingBox();
   assert.ok(shown.width >= skillsPane.width - 100, `The groups use the pane (${shown.width} of ${skillsPane.width}).`);
   const first = await desk.locator('[data-agent-group="profile:main"]').boundingBox();
-  const second = await desk.locator('[data-agent-group="profile:briefs"]').boundingBox();
-  assert.ok(second.x > first.x + first.width - 1 && Math.abs(second.y - first.y) < 2, 'Two groups sit side by side.');
+  const second = await desk.locator('[data-agent-group="agent:claude"]').boundingBox();
+  assert.ok(second.y >= first.y + first.height - 1 && Math.abs(second.x - first.x) < 2, 'The groups are stacked in one column.');
   await noSideways(desk, 'Skills by agent at 1280');
   await bySkill(desk);
   await desk.locator('[data-skill-page]').waitFor();
@@ -235,6 +269,212 @@ try {
   await noSideways(desk, 'Plugins at 1280');
   await desk.getByRole('button', { name: 'By agent' }).click();
 
+  // ---- A long list (53 made-up skills): folds, one group for two profiles, the search, the memory, the keyboard, the deep links.
+  const bigList = async (page, by = 'agent') => {
+    await page.goto(`${big.url}#/~hub/team/skills`);
+    await page.locator('[data-fold]').first().waitFor();
+    if (by === 'skill') await bySkill(page);
+  };
+  const MAIN = '[data-agent-group="profile:main"]';
+
+  step('a long list: categories closed with a name and a count, Hermes and Briefs are one group, the groups are stacked at 1920');
+  const wide = await open({ width: 1920, height: 1000 });
+  await bigList(wide);
+  assert.equal(await wide.locator('[data-skill]').count(), 0, 'Closed categories draw no row.');
+  assert.equal(await wide.locator('[data-agent-group^="profile:"]').count(), 1, 'Two profiles with one list are one group.');
+  assert.match(flat(await wide.locator(`${MAIN} .ui-fold-head`).first().innerText()), /Hermes.*Briefs/);
+  assert.match(flat(await wide.locator(`${MAIN} .ui-fold-head`).first().innerText()), /have the same skills\. 53 skills\. 3 plugins on\./);
+  assert.equal(await wide.locator(`${MAIN} [data-folder]`).count(), 8, 'Seven folders and the loose skills.');
+  assert.equal(flat(await wide.locator(`${MAIN} [data-folder="creative"] [data-fold-count]`).innerText()), '7');
+  assert.equal(flat(await wide.locator(`${MAIN} [data-folder=""] [data-fold-count]`).innerText()), '8');
+  assert.match(flat(await wide.locator(`${MAIN} [data-folder="creative"] .ui-fold-head`).innerText()), /^creative draw, mood-board, paint \+4 7$/, 'A closed head previews three names and the rest.');
+  assert.equal(flat(await wide.locator(`${MAIN} [data-group-plugins] .ui-fold-head`).innerText()).replace(/^Plugins .* (\d+ \d+ on)$/, '$1'), '6 3 on');
+  const stacked = [await wide.locator(MAIN).boundingBox(), await wide.locator('[data-agent-group="agent:claude"]').boundingBox()];
+  assert.ok(stacked[1].y >= stacked[0].y + stacked[0].height - 1 && Math.abs(stacked[1].x - stacked[0].x) < 2, 'At 1920 the groups are stacked.');
+
+  step('every-reply skills are counted on a closed head; one that only some profiles load, and a plugin that differs, say who');
+  assert.equal(flat(await wide.locator(`${MAIN} [data-folder="writing"] [data-fold-auto]`).innerText()), '1 every reply');
+  assert.equal(flat(await wide.locator(`${MAIN} [data-folder=""] [data-fold-auto]`).innerText()), '1 every reply');
+  assert.equal(await wide.locator(`${MAIN} [data-folder="creative"] [data-fold-auto]`).count(), 0);
+  await wide.locator(`${MAIN} [data-folder=""] .ui-fold-head`).click();
+  assert.match(flat(await wide.locator('[data-skill="brief-writer"]').innerText()), /^brief-writer Only for Hermes.* Every reply Yours$/);
+  await wide.locator(`${MAIN} [data-folder="writing"] .ui-fold-head`).click();
+  assert.equal(await wide.locator('[data-skill="writing/simplify-text"] [data-tag-only]').count(), 0, 'Both profiles load it.');
+  await wide.locator(`${MAIN} [data-group-plugins] .ui-fold-head`).click();
+  assert.equal(await wide.locator('[data-plugin="disk-cleanup"]').getAttribute('data-plugin-status'), 'differs');
+  assert.match(flat(await wide.locator('[data-plugin="disk-cleanup"]').innerText()), /Differs$/);
+  assert.match(flat(await wide.locator('[data-plugin-line]').innerText()), /^On for Hermes.* Off for Briefs\.$/);
+  assert.equal(await wide.locator('[data-plugin="chronos"]').getAttribute('data-plugin-status'), 'enabled');
+
+  step('360, 390, 900, 1280, 1920: no sideways scroll in the document or any pane (resting, all open, searching); the search is whole and stays put; every target is 44 px');
+  const target = '[data-skill], [data-plugin], .ui-fold-head, [data-skills-all], [data-team-tab], .tk-tools .ui-seg button, [data-skills-search]';
+  for (const width of [360, 390, 900, 1280, 1920]) {
+    const page = await open({ width, height: 900 });
+    await bigList(page);
+    let agentX = null;
+    for (const by of ['agent', 'skill']) {
+      const label = `${by} at ${width}`;
+      if (by === 'skill') {
+        const button = page.getByRole('button', { name: 'By skill' });
+        const before = await button.boundingBox();
+        await button.click();
+        await page.locator('[data-skills-by="skill"]').waitFor();
+        assert.deepEqual(await button.boundingBox(), before, `${label}: the By skill button moved when it was pressed.`);
+      }
+      await noSideways(page, `${label}, resting`);
+      const field = await page.evaluate(() => {
+        const input = document.querySelector('[data-skills-search]');
+        const box = input.getBoundingClientRect();
+        const home = (input.closest('.ui-pane') ?? input.closest('.tk-top')).getBoundingClientRect();
+        return { x: box.x, width: box.width, left: home.left, right: home.right };
+      });
+      assert.ok(field.width >= 200, `${label}: the search is ${field.width} px wide.`);
+      assert.ok(field.x >= field.left - 0.5 && field.x + field.width <= field.right + 0.5, `${label}: the search is outside its pane.`);
+      if (width >= 900) {
+        if (by === 'agent') agentX = field.x;
+        else assert.ok(Math.abs(field.x - agentX) < 0.5, `${label}: the search is at ${field.x}, in By agent at ${agentX}.`);
+      }
+      await page.locator('[data-skills-all]').click();
+      await page.locator('[data-skill]').first().waitFor();
+      await noSideways(page, `${label}, all open`);
+      for (const [selector, heights] of Object.entries({ target: await page.locator(target).evaluateAll(list => list.map(item => item.getBoundingClientRect().height)) })) {
+        for (const height of heights) assert.ok(height >= 44 - 0.5, `${label}: a ${selector} is ${height} px high.`);
+      }
+      if (width < 900) {
+        const stuck = await page.evaluate(() => {
+          const pane = document.querySelector('.ui-pane-list');
+          pane.scrollTop = 700;
+          return document.querySelector('.tk-find').getBoundingClientRect().top - pane.getBoundingClientRect().top;
+        });
+        assert.ok(Math.abs(stuck) <= 1, `${label}: the search row did not stick (${stuck} px from the top).`);
+        await page.evaluate(() => { document.querySelector('.ui-pane-list').scrollTop = 0; });
+      } else {
+        const bands = await page.evaluate(() => { const band = document.querySelector('.tk-top').getBoundingClientRect(); const pane = document.querySelector('.ui-pane-list'); return { bandTop: band.top, scrolls: pane.scrollHeight > pane.clientHeight, docScrolls: document.scrollingElement.scrollHeight > innerHeight }; });
+        assert.ok(bands.scrolls && !bands.docScrolls, `${label}: the pane scrolls on its own and the page has no second scrollbar.`);
+      }
+      await page.locator('[data-skills-search]').fill('e');
+      await noSideways(page, `${label}, searching`);
+      await page.locator('[data-skills-search]').fill('');
+      await page.locator('[data-skills-all]').click();
+    }
+    await page.context().close();
+  }
+
+  step('search: a skill in a closed category shows and the rest goes; typing keeps focus; clearing, by button and by Escape, gives back what was open and writes nothing');
+  const sp = await open({ width: 1280, height: 900 });
+  await bigList(sp);
+  const stored = () => sp.evaluate(() => localStorage.getItem('hub.team.skillsOpen'));
+  await sp.locator(`${MAIN} [data-folder="research"] .ui-fold-head`).click();
+  assert.equal(await sp.locator('[data-skill]').count(), 6);
+  const kept = await stored();
+  await sp.locator('[data-skills-search]').click();
+  await sp.keyboard.type('wall-j');
+  await sp.locator('[data-skill="games/wall-jump"]').waitFor();
+  assert.equal(await sp.locator('[data-skill]').count(), 1);
+  assert.equal(await sp.locator('[data-folder]').count(), 1, 'Categories with no match are gone.');
+  assert.equal(flat(await sp.locator('[data-folder="games"] [data-fold-count]').innerText()), '1 of 7');
+  assert.equal(flat(await sp.locator('[data-skills-found]').innerText()), '1 skill');
+  assert.equal(await sp.locator('[data-skills-all]').count(), 0, 'The count takes the button\'s place.');
+  assert.equal(await sp.locator('.ui-fold-head[aria-expanded]').count(), 0, 'During a search nothing claims to be a control.');
+  assert.equal(await sp.evaluate(() => document.activeElement?.matches('[data-skills-search]')), true, 'Focus stayed in the box while typing.');
+  assert.equal(await stored(), kept, 'A search writes nothing.');
+  await sp.getByRole('button', { name: 'Clear search' }).click();
+  assert.equal(await sp.locator('[data-skill="games/wall-jump"]').count(), 0);
+  assert.equal(await sp.locator('[data-skill]').count(), 6, 'Exactly what was open is open again.');
+  assert.equal(await sp.locator('[data-folder]').count(), 8);
+  assert.equal(await stored(), kept);
+  await sp.locator('[data-skills-search]').fill('wall');
+  await sp.locator('[data-skill="games/wall-jump"]').waitFor();
+  await sp.keyboard.press('Escape');
+  assert.equal(await sp.locator('[data-skills-search]').inputValue(), '');
+  assert.equal(await sp.evaluate(() => document.activeElement?.matches('[data-skills-search]')), true, 'Escape keeps the focus in the box.');
+  assert.equal(await sp.locator('[data-skill]').count(), 6);
+  await sp.locator('[data-skills-search]').fill('zzzz');
+  assert.equal(flat(await sp.locator('[data-skills-found]').innerText()), 'No match');
+  assert.equal(await sp.locator('[data-group-none]').count(), 1, 'The group is one line that says nothing here matches.');
+  assert.equal(await sp.locator('[data-group-none]').evaluate(line => line.closest('.ui-fold') === null), true, 'and is not a fold.');
+  await sp.locator('[data-skills-search]').fill('chron');
+  assert.equal(flat(await sp.locator('[data-skills-found]').innerText()), '1 plugin');
+  await sp.locator('[data-skills-search]').fill('');
+
+  step('a choice is remembered over a reload; Expand all opens everything and becomes Collapse all, which keeps the groups open');
+  await sp.reload();
+  await sp.locator(`${MAIN} [data-folder="research"] [data-skill]`).first().waitFor();
+  assert.equal(await sp.locator('[data-skill]').count(), 6, 'Reload: research is still open.');
+  assert.equal(await sp.evaluate(() => history.length > 0), true);
+  await sp.locator('[data-skills-all]').click();
+  assert.equal(await sp.locator('[data-skill]').count(), 53, 'Every row shows.');
+  assert.equal(flat(await sp.locator('[data-skills-all]').innerText()), 'Collapse all');
+  await sp.locator('[data-skills-all]').click();
+  assert.equal(await sp.locator('[data-skill]').count(), 0);
+  assert.ok(await sp.locator(`${MAIN} .ui-fold-head`).count() > 5, 'The group stays open: its categories are listed.');
+  assert.equal(flat(await sp.locator('[data-skills-all]').innerText()), 'Expand all');
+
+  step('keyboard: Tab goes search, Expand all, group, category; Enter opens, Space closes; aria-controls names the body');
+  const kb = await open({ width: 1280, height: 900 });
+  await bigList(kb);
+  const focused = () => kb.evaluate(() => ({ expanded: document.activeElement.getAttribute('aria-expanded'), controls: document.activeElement.getAttribute('aria-controls'), text: document.activeElement.innerText, cls: document.activeElement.className, tag: document.activeElement.tagName }));
+  await kb.locator('[data-skills-search]').focus();
+  await kb.keyboard.press('Tab');
+  assert.equal((await focused()).cls.includes('tk-all'), true, 'After the search comes Expand all.');
+  await kb.keyboard.press('Tab');
+  assert.equal((await focused()).expanded, 'true', 'Then the group.');
+  await kb.keyboard.press('Tab');
+  const head = await focused();
+  assert.equal(head.tag, 'BUTTON');
+  assert.match(head.text, /^creative/);
+  assert.equal(head.expanded, 'false');
+  assert.equal(head.controls, null, 'A closed head names no body.');
+  await kb.keyboard.press('Enter');
+  const opened = await focused();
+  assert.equal(opened.expanded, 'true');
+  assert.equal(await kb.evaluate(id => !!document.getElementById(id), opened.controls), true, 'aria-controls names a body that is there.');
+  await kb.keyboard.press('Space');
+  assert.equal((await focused()).expanded, 'false');
+
+  step('By skill: a row names who has it; a deep link opens its category and brings the row into view with the page beside it');
+  const bs = await open({ width: 1280, height: 520 });
+  await bigList(bs, 'skill');
+  assert.equal(await bs.locator('[data-skills-by="skill"] .ui-fold-head').count() > 8, true, 'Categories and Plugins.');
+  assert.equal(await bs.locator('[data-skill-page]').getAttribute('data-skill-page'), 'brief-writer', 'The first skill is open beside the list, with its category.');
+  const bsText = flat(await bs.locator('[data-skill="brief-writer"]').innerText());
+  assert.match(bsText, /^brief-writer All 6 agents with a list Every reply Yours$/);
+  assert.doesNotMatch(bsText, /installed|agents ·/);
+  await bs.goto(`${big.url}#/~hub/team/skills/writing%2Frelease-notes`);
+  await bs.locator('[data-skill-page="writing/release-notes"]').waitFor();
+  assert.equal(await bs.locator('[data-skill="writing/release-notes"]').getAttribute('aria-current'), 'page');
+  assert.equal(await bs.locator('[data-folder="writing"] .ui-fold-head').getAttribute('aria-expanded'), 'true');
+  const inView = () => bs.evaluate(() => {
+    const row = document.querySelector('[data-skill="writing/release-notes"]');
+    const pane = row.closest('.ui-pane').getBoundingClientRect();
+    const box = row.getBoundingClientRect();
+    return box.top >= pane.top - 1 && box.bottom <= pane.bottom + 1;
+  });
+  assert.equal(await inView(), true, 'The row is in view.');
+  const listBox = await bs.locator('[data-skill="writing/release-notes"]').boundingBox();
+  const pageBox = await bs.locator('[data-skill-page]').boundingBox();
+  assert.ok(listBox.x + listBox.width <= pageBox.x + 1, 'The page is beside the list.');
+  await noSideways(bs, 'By skill deep link at 1280');
+
+  step('390: find a skill, open it, go back: the category is still open and the row is in view');
+  const ph = await open({ width: 390, height: 800 }, { hasTouch: true, isMobile: true });
+  await bigList(ph, 'skill');
+  await ph.locator('[data-folder="writing"] .ui-fold-head').tap();
+  await ph.locator('[data-skill="writing/release-notes"]').tap();
+  await ph.locator('[data-skill-page="writing/release-notes"]').waitFor();
+  assert.equal(await hashOf(ph), '#/~hub/team/skills/writing%2Frelease-notes');
+  await ph.goBack();
+  await ph.locator('[data-skill="writing/release-notes"]').waitFor({ state: 'visible' });
+  assert.equal(await ph.locator('[data-folder="writing"] .ui-fold-head').getAttribute('aria-expanded'), 'true');
+  const back = await ph.evaluate(() => {
+    const row = document.querySelector('[data-skill="writing/release-notes"]').getBoundingClientRect();
+    const pane = document.querySelector('.ui-pane-list').getBoundingClientRect();
+    const find = document.querySelector('.tk-find').getBoundingClientRect();
+    return row.top >= Math.max(pane.top, find.bottom) - 1 && row.bottom <= pane.bottom + 1;
+  });
+  assert.equal(back, true, 'Back brings the row into view.');
+  await noSideways(ph, 'By skill after Back at 390');
+
   step('Settings holds the install commands, and search finds them');
   await desk.goto(`${fresh.url}#/~hub/settings`);
   await desk.locator('[data-settings]').waitFor();
@@ -265,6 +505,7 @@ try {
   await desk.locator('[data-skills-freshness="none"]').waitFor();
   assert.match(flat(await desk.locator('[data-skills-freshness]').innerText()), /has not published its settings yet/);
   assert.equal(await desk.locator('[data-skill]').count(), 0);
+  assert.equal(await desk.locator('[data-skills-all]').count(), 0, 'Nothing to fold, so no Expand all.');
   await bySkill(desk);
   assert.equal(await desk.locator('[data-skills-none]').count(), 1);
 
@@ -295,5 +536,5 @@ try {
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
-  for (const fixture of [slash, fresh, stale, bare, plugged]) await fixture.close();
+  for (const fixture of [slash, fresh, stale, bare, plugged, big]) await fixture.close();
 }

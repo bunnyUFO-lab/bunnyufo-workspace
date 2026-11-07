@@ -55,3 +55,19 @@ a.rm-crumb:focus-visible { outline: none; box-shadow: var(--focus-ring); border-
 @media (max-width: 640px) {
   .hub-mapview:has(.hub-map-branchbar) .hub-map-panel { max-height: min(75dvh, calc(100dvh - 520px)); }
 }
+
+/* Hide completed, and the milestones listed by name under a row that is not done (ws-cl0.13.5). */
+.rm-options { display: flex; margin: 0 0 8px; }
+.rm-options .hub-chip { min-height: 32px; }
+.rm-ms { list-style: none; margin: 4px 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rm-ms-link { display: flex; align-items: center; gap: 8px; box-sizing: border-box; min-height: 32px; padding: 4px 10px; color: var(--text); font-size: 0.85rem; text-decoration: none; border-radius: 8px; }
+.rm-ms-link:hover { background: var(--surface-1); }
+.rm-ms-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.rm-ms-link.closed { opacity: 0.55; }
+.rm-ms-link i { flex: none; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--dot, var(--text-muted)); background: transparent; }
+.rm-ms-link i[data-state="done"] { background: var(--dot); }
+.rm-ms-link span { min-width: 0; overflow-wrap: anywhere; }
+@media (pointer: coarse), (max-width: 639px) {
+  .rm-options .hub-chip { min-height: 44px; display: inline-flex; align-items: center; }
+  .rm-ms-link { min-height: 44px; }
+}

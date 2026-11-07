@@ -37,6 +37,6 @@ export function PageProjectChip({ id, pill = true }: { id: string | undefined; p
 }
 
 /** A link to a project's page: `Open <name> ›` by default, or the `label` you give it (`Project`). */
-export function ProjectLink({ id, name, label, className = 'pp-link' }: { id: string; name?: string; label?: string; className?: string }) {
-  return <a className={className} href={projectHash(id)} data-project-link={id}>{label ?? `Open ${name || id}`} ›</a>
+export function ProjectLink({ id, name, label, className = 'pp-link', sprint }: { id: string; name?: string; label?: string; className?: string; /** The sprint the link keeps. */ sprint?: string }) {
+  return <a className={className} href={projectHash(id, undefined, sprint)} data-project-link={id}>{label ?? `Open ${name || id}`} ›</a>
 }

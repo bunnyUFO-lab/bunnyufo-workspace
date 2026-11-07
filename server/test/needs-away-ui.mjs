@@ -4,6 +4,7 @@
 // without a link saying so honestly, a linked one offering "Open the session", an Ask from a session carrying the same
 // link, and 390 px with no sideways scroll. Nothing is ever overwritten: the bucket only gains files.
 import { chromium } from '@playwright/test';
+import './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { askJson, eventJson, minutesAgo, plainOptions } from '../../site/api/test/hub-fixtures.mjs';

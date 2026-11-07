@@ -87,6 +87,7 @@
 .hub-md a { color: var(--pink); text-decoration: underline; text-underline-offset: 2px; border-radius: 2px; }
 .hub-md a:hover { text-decoration-thickness: 2px; }
 .hub-md a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hub-md a.hub-card-open { color: var(--t1); text-decoration: none; max-width: 100%; overflow-wrap: anywhere; margin-block: 2px; }
 
 .hub-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
 .hub-option { position: relative; border: 1px solid var(--hairline-strong); border-radius: var(--radius-lg); background: var(--surface-solid); min-width: 0; }
@@ -521,6 +522,12 @@ button.hub-cl-text { cursor: pointer; }
   .hub-cl-cmd .hub-code { flex-direction: column; align-items: stretch; }
   .hub-cl-cmd .hub-code pre { flex: none; }
   .hub-cl-cmd .hub-copy { order: -1; max-width: none; width: 100%; }
+}
+.hub-closing .hub-code pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow-y: auto; }
+@media (max-width: 600px) {
+  .hub-closing .hub-code { flex-direction: column; align-items: stretch; }
+  .hub-closing .hub-code pre { flex: none; }
+  .hub-closing .hub-copy { order: -1; max-width: none; width: 100%; }
 }
 .hub-cl-title code { font-family: var(--mono, monospace); font-size: 0.86em; padding: 1px 4px; border-radius: 4px; background: var(--surface-solid); }
 

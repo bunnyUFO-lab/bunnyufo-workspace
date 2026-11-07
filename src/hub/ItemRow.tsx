@@ -53,7 +53,7 @@ function ReviewRow({ item, meta }: { item: Item; meta: string }) {
         {item.ask && <b className="hub-row-ask" data-ask>{item.ask}</b>}
         <span className="hub-row-meta">{meta} <span className="hub-row-cue" aria-hidden="true">›</span></span>
       </a>
-      <ReviewActions item={item} onDone={() => undefined} primary={nothingToDo(item.ask) || !item.url} />
+      <ReviewActions item={item} onDone={() => undefined} primary={nothingToDo(item.ask) || (!item.url && !item.prs?.length)} />
     </div>
   )
 }

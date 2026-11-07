@@ -422,7 +422,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   // Sprints on the PC (hub-sprints.mjs): the owner starts a chain of runs on a milestone; a sweep signs each next item when the one before it is done.
   const sprints = createSprints({
     requests: requestFiles, listFolders, cached, putCreateOnly, signingKey: on ? signingKey : null, fail, now, log, repoOf: project => projectRepo(project),
-    writeEvent: (event, at) => putHubEvent(event, at), sweepMs: Number(env.HUB_SPRINT_SWEEP_MS ?? 60_000),
+    notify, sweepMs: Number(env.HUB_SPRINT_SWEEP_MS ?? 60_000),
     // What eligibility is built from: the same data as the map, read fresh (a start is rare and must not judge from a 30-second-old list).
     loadInputs: async (project, at) => {
       const [{ meta, issues }, window, asks, checklists, marks, requests] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), loadChecklists(at), loadMarks(project), loadRequests(at)]);
@@ -1423,7 +1423,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     const { events } = await loadEvents(at);
     const detail = reviewDetail(events, id, await repoProjects());
     if (!detail) throw missing();
-    if (!detail.card) {
+    if (detail.sprintEnd) { const closing = await sprints.closing(detail.sprintEnd).catch(() => null); if (closing) detail.closing = closing; delete detail.sprintEnd; }
+    if (!detail.card && !detail.closing) {
       const inferred = await inferCard(detail).catch(() => null);
       if (inferred) detail.inferred = inferred;
     }
@@ -1993,7 +1994,9 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             reply({ projects: loaded.map(row => projectSummary({ project: row.id, meta: row.meta, issues: applyMarks(row.issues, marks, row.id), now: at })), at: at.toISOString() });
           } else if (route === '/hub/work') {
             const lane = query.get('lane');
-            if (lane === null) { reply(buildWork(await loadWorkInputs(query.get('project'), at))); } else {
+            const sprint = query.get('sprint');
+            if (sprint !== null && !/^[\w.:-]{1,80}$/.test(sprint)) throw fail('That is not a sprint name.', 400);
+            if (lane === null) { reply(buildWork(await loadWorkInputs(query.get('project'), at), sprint ? { sprint } : {})); } else {
               // The rest of a lane the board cut: Backlog and Done only, from an offset the client already holds.
               const offset = Number(query.get('offset') ?? 0);
               if (!PAGE_LANES.includes(lane)) throw fail('Only the Backlog and Done lanes have more.', 400);

@@ -3,6 +3,7 @@ import type { HubProject, JobListRow, JobsView } from '../lib/hub'
 import { ago } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import ProjectPicker from './ProjectPicker'
+import { useScope } from '../lib/useScope'
 import WorkTabs from './WorkTabs'
 import RefreshNote from './RefreshNote'
 import { JOB_STATE, LIVE_JOB, jobTone } from './jobStates'
@@ -38,7 +39,8 @@ export function JobItem({ job, local }: { job: JobListRow; local?: boolean }) {
 
 /** Work > Running and Delivered: what the owner started, each delivered one showing what it delivered instead of its log. */
 export default function Jobs({ tab }: { tab?: string }) {
-  const [project, setProject] = useState('')
+  const scope = useScope()
+  const [project, setProject] = useState(scope.project && scope.project !== 'all' ? scope.project : '')
   const { data, error, loading, at } = useHubData<JobsView>(`/jobs${project ? `?project=${encodeURIComponent(project)}` : ''}`)
   const projects = useHubData<{ projects: HubProject[] }>('/projects')
   const counts = data?.counts

@@ -59,6 +59,8 @@ export interface Item {
   /** A review row: its pull requests (https://github.com links) and how many of them have merged. */
   prs?: string[]
   prsMerged?: number
+  /** A sprint-end review names its sprint. */
+  sprintEnd?: string
   /** A checklist row that is a playtest, and the platform of its build. */
   playtest?: boolean
   platform?: string
@@ -148,6 +150,8 @@ export interface ReviewDetail {
   card?: string
   prs?: string[]
   prsMerged?: number
+  /** A sprint-end item: the closing prompt and what is not done, built by the Hub from the signed sprint. */
+  closing?: { prompt: string; prs: string[]; left: { seq: number; bead: string; title: string; state: string }[] }
   cardDir?: string
   cardFiles?: ReviewFile[]
   screenshots?: ShotPair[]
@@ -381,7 +385,7 @@ export interface ProgressMap {
   meta: { pushedAt: string; host: string; count: number; repo: string } | null
   ageMinutes: number | null
   milestones: MapMilestone[]
-  sprints: { name: string; milestones: { id: string; count: number; total: number }[] }[]
+  sprints: { name: string; /** The group issue that carries the label and names the sprint. */ title?: string; milestones: { id: string; count: number; total: number }[] }[]
   /** The project's roadmaps in order; left out when it has none. */
   roadmaps?: MapRoadmap[]
   /** The Wayfinder destination, when the project has an open `wayfinder:map` issue. */
