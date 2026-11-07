@@ -250,7 +250,7 @@ test('GET /hub/work reads every project with a Beads copy, or one', async () => 
     seedPcStatus(fake, pcStatusJson({ now: NOW, sessions: [{ id: 'pc1', name: 'x', status: 'idle', kind: 'interactive', folder: 'f', repo: 'r', branch: 'sprint/ml-abcd-x' }] }));
 
     const all = (await get('/hub/work')).body;
-    assert.deepEqual(Object.keys(all), ['lanes', 'counts', 'totals', 'at']);
+    assert.deepEqual(Object.keys(all), ['lanes', 'counts', 'totals', 'sprints', 'at']);
     assert.deepEqual(all.totals, all.counts);
     assert.deepEqual(all.lanes.running.map(item => item.key), ['bead:ml-abcd']);
     assert.equal(all.lanes.running[0].live.state, 'idle');
@@ -404,4 +404,102 @@ test('workFilterCount counts each control once and is zero exactly when the filt
     assert.equal(workFilterCount(filter), expected, JSON.stringify(filter));
     assert.equal(workFilterCount(filter) === 0, isDefaultWork(filter), `zero matches isDefaultWork for ${JSON.stringify(filter)}`);
   }
+});
+
+// A sprint is the Beads label `sprint:<name>`: the board lists every sprint, and with one on shows it whole.
+const sprintIssues = () => {
+  const day = n => minutesAgo(NOW, 60 * 24 * n);
+  const issues = [
+    beadsIssue({ id: 'sp-epic', title: 'Sprint 5: the big one', type: 'epic', labels: ['roadmap', 'sprint:s5'], created: '2026-10-05T09:00:00Z' }),
+    beadsIssue({ id: 'sp-sub', title: 'A sub group', type: 'feature', parent: 'sp-epic', labels: ['sprint:s5'], created: '2026-10-05T09:30:00Z' }),
+    beadsIssue({ id: 'sp-t1', title: 'Open one', parent: 'sp-epic', labels: ['sprint:s5'], created: '2026-10-05T10:00:00Z' }),
+    beadsIssue({ id: 'sp-t2', title: 'Doing one', parent: 'sp-sub', labels: ['sprint:s5'], status: 'in_progress', created: '2026-10-05T11:00:00Z' }),
+    beadsIssue({ id: 'sp-t3', title: 'Old done', parent: 'sp-sub', labels: ['sprint:s5'], status: 'closed', closed: iso(day(40)), created: '2026-10-05T12:00:00Z' }),
+    beadsIssue({ id: 'sp-t4', title: 'Fresh done', parent: 'sp-sub', labels: ['sprint:s5'], status: 'closed', closed: iso(day(1)), created: '2026-10-05T13:00:00Z' }),
+    beadsIssue({ id: 'sp-old1', title: 'Sprint four', labels: ['sprint:s4'], status: 'closed', closed: iso(day(50)), created: '2026-09-01T10:00:00Z' }),
+    beadsIssue({ id: 'sp-new1', title: 'Sprint six', labels: ['sprint:s6'], created: '2026-10-20T10:00:00Z' }),
+    beadsIssue({ id: 'sp-plain', title: 'No sprint', created: '2026-10-06T10:00:00Z' }),
+  ];
+  // Fifty-five labelled backlog ideas and thirty-five finished ones: a sprint is not cut like the board.
+  for (let i = 0; i < 55; i++) issues.push(beadsIssue({ id: `sp-b${i}`, title: `Idea ${i}`, status: 'deferred', labels: ['sprint:big'], created: '2026-08-01T10:00:00Z' }));
+  for (let i = 0; i < 35; i++) issues.push(beadsIssue({ id: `sp-d${i}`, title: `Done ${i}`, status: 'closed', closed: iso(day(1)), labels: ['sprint:big'], created: '2026-08-01T11:00:00Z' }));
+  return issues.map(issue => ({ ...issue, project: 'sp' }));
+};
+
+test('buildWork always lists the sprints: done of all over the bead cards before the age limit, open first, then the newest', () => {
+  const work = buildWork({ issues: sprintIssues(), now: NOW });
+  assert.deepEqual(work.sprints.map(row => row.name), ['s6', 's5', 'big', 's4'], 'Open sprints first, the one with the newest oldest task first; the finished one last.');
+  const by = Object.fromEntries(work.sprints.map(row => [row.name, row]));
+  assert.deepEqual(by.s5, { name: 's5', title: 'Sprint 5: the big one', done: 2, total: 4 }, 'Groups are not counted; the old Done task is.');
+  assert.deepEqual(by.s4, { name: 's4', done: 1, total: 1 });
+  assert.deepEqual(by.big, { name: 'big', done: 35, total: 90 });
+  assert.deepEqual(buildWork({ issues: [], now: NOW }).sprints, []);
+  assert.deepEqual(buildWork({ ...workFixture({ now: NOW }), now: NOW }).sprints, []);
+});
+
+test('the sprint title is the oldest group issue that carries the label and whose parent does not', () => {
+  const issues = [
+    beadsIssue({ id: 'g-1', title: 'Newer group', type: 'epic', labels: ['sprint:x'], created: '2026-10-03T10:00:00Z' }),
+    beadsIssue({ id: 'g-0', title: 'Older group', type: 'milestone', labels: ['sprint:x'], created: '2026-10-02T10:00:00Z' }),
+    beadsIssue({ id: 'g-child', title: 'Child group', type: 'feature', parent: 'g-0', labels: ['sprint:x'], created: '2026-10-01T10:00:00Z' }),
+    beadsIssue({ id: 'g-task', title: 'A task', labels: ['sprint:y'], created: '2026-10-01T10:00:00Z' }),
+    beadsIssue({ id: 'g-task2', title: 'A task, not a group', type: 'task', labels: ['sprint:x'], created: '2026-09-01T10:00:00Z' }),
+  ];
+  const by = Object.fromEntries(buildWork({ issues, now: NOW }).sprints.map(row => [row.name, row]));
+  assert.equal(by.x.title, 'Older group', 'The child group has a parent with the label; a task never names a sprint.');
+  assert.equal('title' in by.y, false, 'No group issue, no title.');
+});
+
+test('with a sprint: only its cards, old Done included, no cut, counts match; requests for its beads come along', () => {
+  const issues = sprintIssues();
+  const requests = [
+    { id: 'rq-1', project: 'sp', title: 'For a sprint task', at: iso(NOW), state: 'proposed', bead: 'sp-t1' },
+    { id: 'rq-2', project: 'sp', title: 'For another', at: iso(NOW), state: 'proposed', bead: 'sp-plain' },
+    { id: 'rq-3', project: 'sp', title: 'No bead', at: iso(NOW), state: 'proposed' },
+  ];
+  const input = { issues, requests, hermesRuns: [{ id: 'run-1', title: 'Run', state: 'running', updatedAt: iso(NOW) }], now: NOW };
+  const work = buildWork(input, { sprint: 's5' });
+  assert.deepEqual(Object.values(work.lanes).flat().map(item => item.key).sort(), ['bead:sp-t1', 'bead:sp-t2', 'bead:sp-t3', 'bead:sp-t4', 'request:rq-1']);
+  assert.equal(laneOf(work, 'bead:sp-t3'), 'done', 'Done older than 14 days shows under a sprint.');
+  assert.deepEqual(work.counts, { backlog: 1, ready: 1, running: 1, blocked: 0, review: 0, done: 2 });
+  assert.deepEqual(work.totals, work.counts);
+  assert.equal(work.sprints.length, 4, 'The list of sprints is the whole board, not the narrowed one.');
+  const big = buildWork(input, { sprint: 'big' });
+  assert.equal(big.lanes.backlog.length, 55, 'Backlog is not cut at 50.');
+  assert.equal(big.lanes.done.length, 35, 'Done is not cut at 30.');
+  assert.equal(big.counts.backlog, 55);
+  assert.equal(buildWork(input).lanes.backlog.length, 50, 'Without a sprint the cut stays.');
+  assert.equal(buildWork(input).lanes.done.length, 30);
+  const none = buildWork(input, { sprint: 'nope' });
+  assert.equal(Object.values(none.lanes).flat().length, 0, 'An unknown sprint gives empty lanes.');
+  assert.equal(none.sprints.length, 4);
+});
+
+test('GET /hub/work?sprint= narrows the board and refuses a bad name', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'buw-hub-work-sprint-'));
+  const fake = await startFakeS3();
+  const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
+  fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
+  const hub = createHub({ bucket, enabled: true });
+  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
+  await listenOnGoodPort(server, '127.0.0.1');
+  const get = async route => { const answer = await fetch(`http://127.0.0.1:${server.address().port}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
+  try {
+    const seed = seeder(fake);
+    seed.put('beads/spr.jsonl', jsonl([
+      beadsIssue({ id: 'sr-a', labels: ['sprint:s.5:x-1'] }),
+      beadsIssue({ id: 'sr-b' }),
+      beadsIssue({ id: 'sr-c', status: 'closed', closed: iso(minutesAgo(NOW, 60 * 24 * 60)), labels: ['sprint:s.5:x-1'] }),
+    ]), 'application/x-ndjson');
+    seed.put('beads/spr.meta.json', { pushedAt: iso(NOW) });
+    const board = (await get('/hub/work?project=spr&sprint=s.5:x-1')).body;
+    assert.deepEqual(Object.values(board.lanes).flat().map(item => item.id).sort(), ['sr-a', 'sr-c']);
+    assert.deepEqual(board.sprints, [{ name: 's.5:x-1', done: 1, total: 2 }]);
+    assert.equal(Object.values((await get('/hub/work?project=spr&sprint=nothing')).body.lanes).flat().length, 0);
+    assert.equal((await get('/hub/work?project=spr&sprint=a%20b')).status, 400);
+    assert.equal((await get('/hub/work?project=spr&sprint=a%2Fb')).status, 400);
+    assert.equal((await get(`/hub/work?project=spr&sprint=${'x'.repeat(81)}`)).status, 400);
+    assert.equal((await get('/hub/work?project=spr&sprint=')).status, 400);
+    assert.equal((await get(`/hub/work?project=spr&sprint=${'x'.repeat(80)}`)).status, 200);
+  } finally { server.close(); await fake.close(); }
 });
