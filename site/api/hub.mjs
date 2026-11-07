@@ -54,7 +54,7 @@ import { CHAT_MODELS } from './chat-models.mjs';
 import { teamSkills } from './hub-team-skills.mjs';
 import { cleanHostSchedules, HOST_SCHEDULES_FILE, HOST_SCHEDULES_MAX_BYTES } from './hub-other-schedules.mjs';
 import { jobPromptChanges, schedulesView, SEEN_FILE, seenText, validSeen } from './hub-schedules.mjs';
-import { JOB_ID_RE, jobChangeState, jobChangeView, signedPromptHashes, validJobChange } from './hub-job-change.mjs';
+import { failTitle, JOB_ID_RE, jobChangeState, signedPromptHashes, signedRemovedJobs, validJobChange } from './hub-job-change.mjs';
 import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { jobRow, verifyJob } from './chat-jobs.mjs';
@@ -587,18 +587,35 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   /** Every signed job change with its result, newest first (`jobs`: the ones of kind `job-change`, whose folder ids are `<day>-job-briefs-<rand4>`). The two kinds never share the 20 newest. */
   async function loadJobChanges(at) { return loadSigned(at, true); }
 
-  async function loadSigned(at, jobs) {
-    const found = new Map();
-    for (const month of monthPrefixes(at)) {
-      const { objects } = await bucket.list(key(`agent-config/changes/${month}`));
-      for (const object of objects) {
-        const parts = object.key.slice(folder('agent-config').length).split('/');
-        // Exactly changes/<id>/<file>.
-        if (parts.length !== 3 || parts[0] !== 'changes' || !validId(parts[1])) continue;
-        if (!found.has(parts[1])) found.set(parts[1], new Map());
-        found.get(parts[1]).set(parts[2], object.lastModified ? new Date(object.lastModified).toISOString() : '');
+  /**
+   * The folders under agent-config/changes of this and last month, `id -> Map(file -> last-modified)`. Both kinds of change are in it, and callers that start
+   * together (the sweep reads both) share one listing while it runs; a listing is never reused once it has finished, so a change just signed is seen at once.
+   */
+  const listing = new Map();
+  function listChangeFolders(at) {
+    const months = monthPrefixes(at);
+    const id = months.join();
+    if (listing.has(id)) return listing.get(id);
+    const run = (async () => {
+      const found = new Map();
+      for (const month of months) {
+        const { objects } = await bucket.list(key(`agent-config/changes/${month}`));
+        for (const object of objects) {
+          const parts = object.key.slice(folder('agent-config').length).split('/');
+          // Exactly changes/<id>/<file>.
+          if (parts.length !== 3 || parts[0] !== 'changes' || !validId(parts[1])) continue;
+          if (!found.has(parts[1])) found.set(parts[1], new Map());
+          found.get(parts[1]).set(parts[2], object.lastModified ? new Date(object.lastModified).toISOString() : '');
+        }
       }
-    }
+      return found;
+    })().finally(() => listing.delete(id));
+    listing.set(id, run);
+    return run;
+  }
+
+  async function loadSigned(at, jobs) {
+    const found = await listChangeFolders(at);
     const out = [];
     for (const [id, names] of [...found].filter(([name]) => JOB_ID_RE.test(name) === jobs).sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 20)) {
       if (!names.has('approved.json')) continue;
@@ -633,8 +650,9 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     noteChanges = { last: at.getTime(), running: true };
     try {
       const recent = item => item.result && at.getTime() - Date.parse(item.landedAt || item.result.at) < 24 * 3600 * 1000;
-      const rows = (await loadAllChanges(at)).filter(recent);
-      const jobRows = (await loadJobChanges(at)).filter(recent);
+      const [all, allJobs] = await Promise.all([loadAllChanges(at), loadJobChanges(at)]);
+      const rows = all.filter(recent);
+      const jobRows = allJobs.filter(recent);
       if (!rows.length && !jobRows.length) return;
       const { events } = await loadEvents(at);
       if (jobRows.length) {
@@ -644,7 +662,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
           if (events.some(event => event.change === change.change && (event.kind === 'job-change' || event.kind === 'alert'))) continue;
           const state = jobChangeState({ change, result, exported, at });
           if (state === 'failed') {
-            await putHubEvent({ ts: landedAt || result.at, kind: 'alert', change: change.change, job: change.job, title: `The change to ${change.job} did not go through: ${jobChangeView({ change, result, landedAt, exported, at }).reason.replace(/\.$/, '')}. ${result.code === 'job-check' || result.code === 'expired' ? 'Check the job.' : 'The job is as it was.'}`, host: 'hub', source: 'hub', by: change.by }, new Date(landedAt || result.at));
+            await putHubEvent({ ts: landedAt || result.at, kind: 'alert', change: change.change, job: change.job, title: failTitle(change, result.code), host: 'hub', source: 'hub', by: change.by }, new Date(landedAt || result.at));
           } else {
             await putHubEvent({ ts: landedAt || result.at, kind: 'job-change', change: change.change, job: change.job, title: `${change.job}: ${JOB_DONE_WORDS[change.op]}`, host: 'hub', source: 'hub', by: change.by }, new Date(landedAt || result.at));
           }
@@ -687,8 +705,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       if (!exported || exportFreshness(exported, at) !== 'fresh') return;
       const got = await fresh(SEEN_FILE);
       // The prompts the Hub itself signed are not news (a change from the Schedules page, or a way back to the earlier prompt).
-      const signed = signedPromptHashes(await loadJobChanges(at));
-      const { jobs, alerts, changed } = jobPromptChanges({ seen: validSeen(got?.value), exported, signed });
+      const signedChanges = await loadJobChanges(at);
+      const { jobs, alerts, changed } = jobPromptChanges({ seen: validSeen(got?.value), exported, signed: signedPromptHashes(signedChanges), removed: signedRemovedJobs(signedChanges) });
       if (!changed) return;
       if (alerts.length) {
         const { events } = await loadEvents(at);

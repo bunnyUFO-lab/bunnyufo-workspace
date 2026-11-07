@@ -22,7 +22,7 @@ import { validateAgentEdit } from './agent-edit.mjs';
 import { effectiveSet, exportFreshness, changeState } from './hub-agent-config.mjs';
 import { day8, randomId } from './hub-model.mjs';
 import { newNonce, sign } from './signing.mjs';
-import { fromOf, JOB_KIND, JOB_NAME_RE, JOB_OPS, JOB_PROFILE, jobChangeState, jobIs, pinOf, promptEditable, promptProblem, sha256Text, TARGET_RE, validSchedule } from './hub-job-change.mjs';
+import { changeOpen, fromOf, JOB_KIND, JOB_NAME_RE, JOB_OPS, JOB_PROFILE, jobChangeState, jobIs, pinOf, promptEditable, promptProblem, sha256Text, TARGET_RE, validSchedule } from './hub-job-change.mjs';
 
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 /**
@@ -294,7 +294,7 @@ export function createAgentEdits({ personas, profiles = null, log = () => {} }) 
     // A change not yet in the export would make the next one a `stale` on the host: wait for the export, up to 20 minutes after the host's result.
     const open = (await profiles.jobChanges(at)).filter(item => item.change.job === job).find(item => {
       const state = jobChangeState({ change: item.change, result: item.result, exported, at });
-      return state === 'waiting' || (state === 'applied' && at.getTime() - Date.parse(item.result.at) < 20 * 60 * 1000);
+      return changeOpen({ state, result: item.result, at });
     });
     if (open) throw problem(`A change of the job ${job} is still waiting for the Hermes host (${open.change.change}).`);
     return { op, job, fromRev, from, to: out, live };

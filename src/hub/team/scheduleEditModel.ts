@@ -112,7 +112,7 @@ export interface ChangeLine { tone: 'wait' | 'run' | 'done' | 'bad'; text: strin
 export function changeLine(change: JobChange, job: Pick<ScheduleJob, 'nextRunAt' | 'enabled' | 'state'> | null, before: string | null | undefined): ChangeLine {
   switch (change.state) {
     case 'waiting': return { tone: 'wait', text: 'Waiting for the Hermes host' }
-    case 'applied': return { tone: 'run', text: 'Running. The page updates when the host reports.' }
+    case 'applied': return change.open === false ? { tone: 'done', text: 'The host applied this. The job has changed since.' } : { tone: 'run', text: 'Running. The page updates when the host reports.' }
     case 'failed': return { tone: 'bad', text: change.reason ?? 'The host did not apply the change.' }
     case 'late': return { tone: 'bad', text: change.reason ?? 'The Hermes host did not pick this up.' }
     default: break

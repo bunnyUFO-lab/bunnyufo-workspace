@@ -272,6 +272,8 @@ export interface JobChange {
   op: 'edit' | 'pause' | 'resume' | 'remove' | 'add'
   job: string
   state: ChangeState
+  /** The change still holds the job: waiting, or applied for under 20 minutes. The same rule the Hub's press check uses. */
+  open: boolean
   at: string
   by: string
   from: { schedule: string; provider: string | null; model: string | null } | null

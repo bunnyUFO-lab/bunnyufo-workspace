@@ -12,7 +12,7 @@ import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { validChange, validExport, validResult } from '../hub-agent-config.mjs';
-import { failWords, jobChangeState, jobChangeView, JOB_ID_RE, promptProblem, refusedWords, sha256Text, validJobChange, validSchedule } from '../hub-job-change.mjs';
+import { failTitle, failWords, jobChangeState, jobChangeView, JOB_ID_RE, promptProblem, refusedWords, sha256Text, validJobChange, validSchedule } from '../hub-job-change.mjs';
 import { canonical, parsePublicKey, publicKeyPem, verify } from '../signing.mjs';
 import { schedulesView } from '../hub-schedules.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
@@ -530,4 +530,64 @@ test('the export\'s deliverOptions are cleaned: only discord targets with a labe
   delete raw.profiles.briefs.jobEdits;
   assert.equal(validExport(raw).profiles.briefs.jobEdits, undefined);
   assert.ok(scheduleJobs(NOW).length === 4);
+});
+
+// --- review fixes (blockers 2, 3 and 4) ---
+
+test('the form is never locked by a change the export does not show: one rule, `open`, for the page and the server', async () => {
+  const f = await fixture();
+  try {
+    putExport(f);
+    const made = await edit(f, 'brief-morning-digest', { schedule: '0 9 * * 2' });
+    f.clock.time += 60_000;
+    hostResult(f, made.body.change, 'applied', 'ok');
+    f.clock.time += 60_000;
+    putExport(f, { minutes: 0 });   // the export never shows the change (the job was changed another way)
+    let job = await jobOf(f, 'brief-morning-digest');
+    assert.deepEqual([job.change.state, job.change.open, job.editable], ['applied', true, true], 'within 20 minutes of the result the change holds the job');
+    assert.equal((await edit(f, 'brief-morning-digest', { schedule: '0 10 * * 2' })).status, 409, 'and the server agrees');
+    f.clock.time += 21 * 60_000;
+    putExport(f, { minutes: 0 });
+    job = await jobOf(f, 'brief-morning-digest');
+    assert.deepEqual([job.change.state, job.change.open, job.editable], ['applied', false, true], '20 hours later too: the page may press');
+    assert.equal((await edit(f, 'brief-morning-digest', { schedule: '0 10 * * 2' })).status, 201, 'and the server lets it through');
+    // A waiting change holds the job; a failed one never does.
+    const waiting = await jobOf(f, 'brief-weekly-report');
+    assert.equal(waiting.change, undefined);
+  } finally { await f.close(); }
+});
+
+test('the prompt alert: the owner\'s own removal is not "gone"; a job that vanishes with no signed removal still alerts', async () => {
+  const f = await fixture();
+  try {
+    putExport(f);
+    await f.call('GET', '/hub/schedules');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    f.clock.time += 31_000;
+    const trends = await jobOf(f, 'brief-trends-watch');
+    const removed = await press(f, { op: 'remove', job: trends.name, base: trends.rev });
+    f.clock.time += 31_000;
+    hostResult(f, removed.body.change, 'applied', 'ok');
+    putExport(f, { minutes: 0, mutate: cron => { cron.splice(cron.findIndex(job => job.name === 'brief-trends-watch'), 1); cron.splice(cron.findIndex(job => job.name === 'brief-spend-summary'), 1); } });
+    await f.call('GET', '/hub/schedules');
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const alerts = eventsOf(f).filter(event => event.kind === 'alert' && event.job);
+    assert.deepEqual(alerts.map(event => event.job), ['brief-spend-summary'], 'only the job nobody removed from Schedules');
+    assert.match(alerts[0].title, /gone from the Hermes host, not removed from Schedules/);
+  } finally { await f.close(); }
+});
+
+test('the words of a failed change: could not be confirmed says it may have gone through, and an add that failed at config-write says the job exists', () => {
+  const edited = change({ job: 'brief-x' });
+  for (const code of ['job-check', 'expired']) {
+    const title = failTitle(edited, code);
+    assert.match(title, /could not be confirmed\. It may have gone through\. Open the job and check/, code);
+    assert.doesNotMatch(title, /did not go through|is as it was/, code);
+  }
+  const added = change({ op: 'add', from: null, fromRev: '', to: { schedule: '0 7 * * 1', prompt: 'x', postsTo: 'discord:1', provider: null, model: null } });
+  assert.match(failTitle(added, 'config-write'), /was added, but the host could not update its list of removed jobs\. The job exists\./);
+  assert.doesNotMatch(failTitle(added, 'config-write'), /as it was/);
+  assert.match(failWords(added, 'config-write'), /^The job was added/);
+  assert.equal(failTitle(edited, 'stale'), 'The change to brief-x did not go through: The job changed on the host since you opened this. The job is as it was.');
+  assert.equal(failTitle(change({ job: 'brief-x', to: { prompt: 'x' } }), 'job-refused'), 'The change to brief-x did not go through: Hermes refused this prompt. The job is as it was.');
 });

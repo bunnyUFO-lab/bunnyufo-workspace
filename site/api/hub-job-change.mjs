@@ -139,7 +139,29 @@ export function refusedWords(change) {
   return 'Hermes refused this change.';
 }
 
-export const failWords = (change, code) => (code === 'job-refused' ? refusedWords(change) : JOB_FAIL_WORDS[code] ?? 'The host did not apply the change.');
+export function failWords(change, code) {
+  if (code === 'job-refused') return refusedWords(change);
+  // On an add, the job exists by the time the removed-names list is written: only that list failed.
+  if (code === 'config-write' && change.op === 'add') return 'The job was added, but the host could not update its list of removed jobs.';
+  return JOB_FAIL_WORDS[code] ?? 'The host did not apply the change.';
+}
+
+/** The title of the alert for a failed change. `job-check` and `expired` can mean it went through, and an add that failed at `config-write` did create the job. */
+export function failTitle(change, code) {
+  if (code === 'job-check' || code === 'expired') return `The change to ${change.job} could not be confirmed. It may have gone through. Open the job and check its schedule, prompt and model.`;
+  if (code === 'config-write' && change.op === 'add') return `The job ${change.job} was added, but the host could not update its list of removed jobs. The job exists. Check it.`;
+  return `The change to ${change.job} did not go through: ${failWords(change, code).replace(/\.$/, '')}. The job is as it was.`;
+}
+
+/** How long after the host's result a change still holds the job's next press: an export that never shows it must not lock the job for a day. */
+export const JOB_OPEN_MS = 20 * 60 * 1000;
+/** One rule for the server's press check and the page's form: open while `waiting`, or `applied` for under 20 minutes after the host's result. */
+export const changeOpen = ({ state, result = null, at }) => state === 'waiting' || (state === 'applied' && !!result && at.getTime() - Date.parse(result.at) < JOB_OPEN_MS);
+
+/** Names of jobs the Hub signed a removal for (not a failed one, except the two codes that may have gone through): the prompt alert does not call them gone. */
+export const signedRemovedJobs = changes => new Set(changes
+  .filter(item => item.change.op === 'remove' && (!item.result || item.result.outcome === 'applied' || item.result.code === 'job-check' || item.result.code === 'expired'))
+  .map(item => item.change.job));
 
 /**
  * Where a signed job change stands. `live` wins over `failed` and `late`: when an export made at or after the result (or, with none, after
@@ -169,7 +191,7 @@ export function jobChangeView({ change, result = null, landedAt = '', exported =
   const to = change.to ? { ...(('schedule' in change.to) ? { schedule: change.to.schedule } : {}), ...(('provider' in change.to) ? { provider: change.to.provider, model: change.to.model } : {}), ...(('prompt' in change.to) ? { promptChanged: true } : {}) } : null;
   const from = change.from ? { schedule: change.from.schedule, provider: change.from.provider, model: change.from.model } : null;
   return {
-    id: change.change, op: change.op, job: change.job, state, at: change.at, by: change.by, from, to,
+    id: change.change, op: change.op, job: change.job, state, open: changeOpen({ state, result: mine, at }), at: change.at, by: change.by, from, to,
     ...(mine ? { resultAt: mine.at } : {}),
     ...(mine?.outcome === 'applied' ? { runningAt: landedAt || mine.at } : {}),
     ...(state === 'failed' ? { code: mine.code, reason: failWords(change, mine.code) } : {}),

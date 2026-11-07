@@ -136,12 +136,12 @@ export const seenText = (jobs, at) => `${JSON.stringify({ v: 1, at: at.toISOStri
 /**
  * What a sweep does with the newest fresh export.
  * - `seen`: `validSeen(...)` or null (first run: store the baseline, no alert).
- * - `signed`: hashes of prompts the Hub itself signed, which are not news (none exist until the Hub can sign a job change).
+ * - `signed`: hashes of prompts the Hub itself signed, which are not news. `removed`: names of `briefs` jobs the Hub signed a removal for, which are not "gone".
  * → `{ jobs, alerts, changed }`: the baseline to keep, the alerts to write (`{ job, profile, hash, kind, title }`), and whether the baseline differs from `seen`.
  * A profile whose block has no job list is left alone, and so is a job without a hash: an older exporter must not read as "everything is gone".
  * The words are fixed; the only text taken from the host is the job's name, and never any of its prompt.
  */
-export function jobPromptChanges({ seen, exported, signed = new Set() }) {
+export function jobPromptChanges({ seen, exported, signed = new Set(), removed = new Set() }) {
   const jobs = { ...(seen ?? {}) };
   const alerts = [];
   const listed = exported ? PROFILES.filter(name => Array.isArray(exported.profiles[name]?.cron)) : [];
@@ -166,6 +166,7 @@ export function jobPromptChanges({ seen, exported, signed = new Set() }) {
       const profile = name.slice(0, name.indexOf('/'));
       if (!listed.includes(profile) || now.has(name)) continue;
       const job = name.slice(name.indexOf('/') + 1);
+      if (profile === 'briefs' && removed.has(job)) { delete jobs[name]; continue; }   // the owner's own removal is not news
       alerts.push({ job, profile, hash: 'gone', kind: 'gone', title: `The job ${job} is gone from the Hermes host, not removed from Schedules. Check it.` });
       delete jobs[name];
     }

@@ -14,7 +14,7 @@ type Refresh = (signal: AbortSignal) => Promise<void>
 const refName = (ref: ModelRef) => `${ref.provider} · ${ref.model}`
 const FOLLOW = 'follow'
 const keyOf = (ref: ModelRef | null) => (ref ? `${ref.provider}/${ref.model}` : FOLLOW)
-const pending = (change: JobChange | undefined) => change?.state === 'waiting' || change?.state === 'applied'
+const pending = (change: JobChange | undefined) => change?.open === true
 
 /** The cadence field: every day, chosen weekdays or a cron text, with a time, and the words under it. */
 function CadenceField({ cadence, onChange, zone, disabled }: { cadence: Cadence; onChange: (next: Cadence) => void; zone: string | undefined; disabled: boolean }) {
