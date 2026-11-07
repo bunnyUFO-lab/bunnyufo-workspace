@@ -118,7 +118,7 @@ test('configuration: unset URL → chat false and 503; a failing Hermes → 502 
     assert.equal((await broken.call('GET', '/hub/chat', undefined, {})).status, 401, 'Even reads need Remote-User.');
     assert.equal((await broken.call('POST', '/hub/chat', { text: 'x' }, {})).status, 401);
     const anonymous = await (await broken.call('GET', '/capabilities', undefined, {})).json();
-    assert.deepEqual([anonymous.hub, anonymous.chat], [true, false]);
+    assert.deepEqual([anonymous.hub, anonymous.chat], [false, false]);
     assert.equal((await broken.call('POST', '/hub/chat', { text: '' })).status, 400);
     assert.equal((await broken.call('POST', '/hub/chat', { text: 'x'.repeat(70 * 1024) })).status, 400, 'Long text is refused by length.');
     assert.equal((await broken.call('POST', '/hub/chat', { text: 'x'.repeat(7.5 * 1024 * 1024) })).status, 413);
