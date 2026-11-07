@@ -9,6 +9,8 @@ import { FOLD_F, FOLD_M, OPEN_F, OPEN_M, slotAt, stableOf, zoomStep } from '../.
 import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.mjs';
 import { PROJECT_TABS, TASK_PAGE, currentMilestone, listed, orderedTasks, roadmapList, tabCounts, tabOf } from '../../../src/hub/projectPage.ts';
 import { parseProjectId, projectHash, projectNodeHash } from '../../../src/lib/route.ts';
+import { buildMap } from '../hub-map.mjs';
+import { beadsIssue } from './hub-fixtures.mjs';
 import { FULL, UNFILED, branchModel, branchTarget, childrenOf, crumbs, milestoneDots, parseSaved, resolveBranch, rowsOf } from '../../../src/hub/mapBranch.ts';
 
 const box = { w: 390, h: 300 };
@@ -579,4 +581,18 @@ test('"This branch" goes to the branch last in, else the current milestone, else
   assert.equal(branchTarget(quiet, null), 'r1', 'With no current milestone, the first roadmap.');
   assert.deepEqual(parseSaved({ view: 'full', branch: 'r2' }), { view: 'full', branch: 'r2' });
   for (const bad of [null, 5, 'x', {}, { view: 'branch' }, { view: 'side', branch: 'r1' }]) assert.equal(parseSaved(bad), null);
+});
+
+test('the map names each sprint after the group issue that carries its label', () => {
+  const issues = [
+    beadsIssue({ id: 'm-ms', title: 'Milestone', type: 'milestone' }),
+    beadsIssue({ id: 'm-epic', title: 'Sprint 5: the big one', type: 'epic', parent: 'm-ms', labels: ['sprint:s5'], created: '2026-10-05T09:00:00Z' }),
+    beadsIssue({ id: 'm-sub', title: 'A sub group', type: 'feature', parent: 'm-epic', labels: ['sprint:s5'], created: '2026-10-05T08:00:00Z' }),
+    beadsIssue({ id: 'm-t1', title: 'Task one', parent: 'm-sub', labels: ['sprint:s5'] }),
+    beadsIssue({ id: 'm-t2', title: 'Task two', parent: 'm-sub', labels: ['sprint:s4'] }),
+  ];
+  const map = buildMap({ project: 'p', issues, now: new Date('2026-11-03T12:00:00Z') });
+  const by = Object.fromEntries(map.sprints.map(row => [row.name, row]));
+  assert.equal(by.s5.title, 'Sprint 5: the big one', 'The sub group has a parent with the label, so the epic names it.');
+  assert.equal('title' in by.s4, false, 'No group issue carries the label: no title.');
 });

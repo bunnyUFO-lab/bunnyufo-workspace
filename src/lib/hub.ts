@@ -375,7 +375,7 @@ export interface ProgressMap {
   meta: { pushedAt: string; host: string; count: number; repo: string } | null
   ageMinutes: number | null
   milestones: MapMilestone[]
-  sprints: { name: string; milestones: { id: string; count: number; total: number }[] }[]
+  sprints: { name: string; /** The group issue that carries the label and names the sprint. */ title?: string; milestones: { id: string; count: number; total: number }[] }[]
   /** The project's roadmaps in order; left out when it has none. */
   roadmaps?: MapRoadmap[]
   /** The Wayfinder destination, when the project has an open `wayfinder:map` issue. */

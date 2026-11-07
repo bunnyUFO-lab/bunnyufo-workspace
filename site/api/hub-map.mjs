@@ -11,6 +11,30 @@ import { plainText, summaryOf, prsFromIssue, commitsFromIssue, cardRefsOf } from
 export const isMilestoneIssue = issue => issue.issue_type === 'milestone' || (issue.labels ?? []).some(label => label === 'milestone' || label === 'wayfinder:map');
 const isGroupType = issue => issue.issue_type === 'epic' || issue.issue_type === 'feature';
 
+/**
+ * The title of each sprint: of the group issues (epic, feature, milestone) that carry `sprint:<name>`, the one whose parent does not carry it,
+ * the oldest first when several do. A sprint with no such issue has no title. Returns a Map of name to title.
+ */
+export function sprintTitlesOf(issues) {
+  const byId = new Map(issues.map(issue => [issue.id, issue]));
+  const parentOf = new Map();
+  for (const issue of issues) for (const dep of issue.dependencies ?? []) if (dep.issue_id === issue.id && dep.type === 'parent-child') parentOf.set(issue.id, dep.depends_on_id);
+  const best = new Map();
+  for (const issue of issues) {
+    if (!(isGroupType(issue) || issue.issue_type === 'milestone')) continue;
+    const parent = byId.get(parentOf.get(issue.id));
+    for (const label of issue.labels ?? []) {
+      if (!label.startsWith('sprint:')) continue;
+      if ((parent?.labels ?? []).includes(label)) continue;
+      const name = label.slice(7);
+      const have = best.get(name);
+      const older = !have || (issue.created_at ?? '') < (have.created_at ?? '') || ((issue.created_at ?? '') === (have.created_at ?? '') && issue.id < have.id);
+      if (older) best.set(name, issue);
+    }
+  }
+  return new Map([...best].map(([name, issue]) => [name, issue.title ?? issue.id]));
+}
+
 /** Roll a list of child states up into one, as the prototype's `roll` does. */
 export function roll(states) {
   if (!states.length) return 'later';
@@ -458,7 +482,8 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     }
     for (const [name, count] of counts) sprintInfo.get(name).milestones.push({ id: milestone.id, count, total: tasks.length });
   }
-  const sprints = [...sprintInfo.values()].sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : a.name < b.name ? -1 : 1)).map(({ name, milestones: list }) => ({ name, milestones: list }));
+  const sprintTitles = sprintTitlesOf(issues);
+  const sprints = [...sprintInfo.values()].sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : a.name < b.name ? -1 : 1)).map(({ name, milestones: list }) => ({ name, ...(sprintTitles.has(name) ? { title: sprintTitles.get(name) } : {}), milestones: list }));
 
   for (const milestone of milestones) for (const feature of milestone.features) for (const task of feature.tasks) delete task.createdAt;
 
