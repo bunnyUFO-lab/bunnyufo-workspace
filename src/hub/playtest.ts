@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { PlaytestIssue, PlaytestVerdict } from '../lib/hub'
+import type { Checklist, PlaytestIssue, PlaytestVerdict } from '../lib/hub'
 import { HubError, hubPost } from '../lib/hub'
 import { host } from '../lib/host'
 import { prepareImage, toBase64 } from './chatImages'
@@ -11,8 +11,10 @@ export const MAX_ISSUES = 30
 /** What the owner is writing in a playtest: a rating, issues (each with a screenshot if they like) and a verdict. Held until Send report. */
 /** What a held report left behind (Undo, or a send that failed), by checklist. */
 export interface ReportDraft { rating: number; verdict: PlaytestVerdict | null; issues: PlaytestIssue[]; draft: string; shot: string | null }
-export function usePlaytestReport(checklistId: string, live: boolean, reload: () => void) {
-  const [saved] = useState(() => heldDraft<{ report?: ReportDraft }>(`checklist-${checklistId}`)?.report)
+export function usePlaytestReport(checklistId: string, live: boolean, reload: () => void, previous?: Checklist['previous']) {
+  // A held report (Undo) wins; else what the owner sent before reopening, so a reopened report starts from the one they wrote.
+  const [saved] = useState<ReportDraft | undefined>(() => heldDraft<{ report?: ReportDraft }>(`checklist-${checklistId}`)?.report
+    ?? (previous && previous.rating ? { rating: previous.rating, verdict: previous.verdict ?? null, issues: previous.issues ?? [], draft: '', shot: null } : undefined))
   const [rating, setRating] = useState(saved?.rating ?? 0)
   const [verdict, setVerdict] = useState<PlaytestVerdict | null>(saved?.verdict ?? null)
   const [issues, setIssues] = useState<PlaytestIssue[]>(saved?.issues ?? [])

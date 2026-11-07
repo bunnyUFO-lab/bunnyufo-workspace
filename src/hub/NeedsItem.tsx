@@ -150,7 +150,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
           ? <div className="ni-b"><AskBody ask={detail as Ask} reload={reload} onSettled={(verb, said) => onSettled(item, verb, said ? { detail: said } : undefined)} /></div>
           : <div className="ni-b"><p className="hub-muted">{fetched.error ?? 'Loading…'}</p>{link && <a className="hub-btn" href={link}>Open</a>}</div>)}
         {item.kind === 'checklist' && (detail
-          ? <div className="ni-b"><ChecklistBody data={detail as Checklist} loadedAt={at} reload={reload} onSubmitted={() => onSettled(item, kind === 'playtest' ? 'reported' : 'submitted')} /></div>
+          ? <div className="ni-b"><ChecklistBody key={(detail as Checklist).revision ?? 1} data={detail as Checklist} loadedAt={at} reload={reload} onSubmitted={() => onSettled(item, kind === 'playtest' ? 'reported' : 'submitted')} /></div>
           : <div className="ni-b"><p className="hub-muted">{fetched.error ?? 'Loading…'}</p></div>)}
         {item.kind === 'approval' && <ApprovalBody id={item.id} onSettled={verb => onSettled(item, verb)} />}
         {item.kind === 'review' && <ReviewBody item={item} onSettled={() => onSettled(item, 'done')} />}

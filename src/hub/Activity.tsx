@@ -10,7 +10,7 @@ import { useHubData } from './useHub'
 
 const FILTERS: [string, string, (kind: string) => boolean][] = [
   ['all', 'All', () => true],
-  ['agents', 'Agents', kind => kind.startsWith('session-') || kind.startsWith('run-') || ['blocked', 'ready-for-review', 'review-done', 'ask-created', 'resumed', 'checklist-created', 'checklist-submitted'].includes(kind)],
+  ['agents', 'Agents', kind => kind.startsWith('session-') || kind.startsWith('run-') || ['blocked', 'ready-for-review', 'review-done', 'ask-created', 'resumed', 'checklist-created', 'checklist-submitted', 'checklist-reopened'].includes(kind)],
   ['deploys', 'Deploys', kind => kind === 'deployed'],
   ['ci', 'CI', kind => kind.startsWith('pr-') || kind.startsWith('ci-')],
   ['alerts', 'Alerts', kind => kind === 'alert'],

@@ -346,6 +346,27 @@ for (const via of ['api', 's3']) {
       assert.equal((await cli(via, 'checklist', 'pickup', id)).code, 3);
       assert.match((await cli(via, 'checklist', 'get', id)).stdout, /\tpicked-up\t[\s\S]*== pickup\.json/);
 
+      // The owner reopens it after the agent picked it up: open again, the replaced submission kept as previous, nothing of round 1 stands for round 2.
+      fake.seed(`${folder(id)}reopen-2.json`, JSON.stringify({ at: '2026-10-27T15:30:00.000Z', by: 'owner', revision: 2, pickedUp: true }), 'application/json');
+      const reopened = await cli(via, 'checklist', 'get', id);
+      assert.match(reopened.stdout, new RegExp(`^${id}\\topen\\t1 of 3 done\\tprobe\\trevision 2\\n`));
+      assert.match(reopened.stdout, /reopened by the owner[^\n]*revision 2[^\n]*An earlier answer was picked up[^\n]*wait for the new submission/);
+      assert.match(reopened.stdout, /== previous submission \(revision 1, replaced\)[\s\S]*"note": "All but DMs\."/);
+      const reopenedJson = JSON.parse((await cli(via, 'checklist', 'get', id, '--json')).stdout);
+      assert.deepEqual({ state: reopenedJson.state, revision: reopenedJson.revision, submit: reopenedJson.submit, pickup: reopenedJson.pickup, previous: reopenedJson.previous.note }, { state: 'open', revision: 2, submit: undefined, pickup: undefined, previous: 'All but DMs.' });
+      assert.match((await cli(via, 'checklist', 'list', '--open')).stdout, new RegExp(`${id}\\topen\\t1/3\\tprobe\\t[^\\t]*\\trevision 2`));
+      assert.equal((await cli(via, 'checklist', 'pickup', id)).code, 2, 'Round 1 pickup.json does not make round 2 picked up, and there is nothing to pick up yet.');
+      assert.equal((await cli(via, 'checklist', 'wait', id, '--timeout', '0.03', '--every', '5')).code, 4, 'wait waits for the new submission.');
+      fake.seed(`${folder(id)}submit-2.json`, JSON.stringify({ at: '2026-10-27T15:40:00.000Z', by: 'owner', note: 'DMs done.', done: ['01', '02'], open: ['03'] }), 'application/json');
+      const again = await cli(via, 'checklist', 'wait', id, '--timeout', '1', '--every', '5');
+      assert.equal(again.code, 0, again.stderr);
+      assert.match(again.stdout, new RegExp(`^${id}\\tsubmitted\\t.*\\trevision 2\\n`));
+      assert.match(again.stdout, /== submit-2\.json[\s\S]*"note": "DMs done\."/);
+      assert.equal((await cli(via, 'checklist', 'pickup', id)).code, 0);
+      assert.equal(fake.json(`${folder(id)}pickup-2.json`).host !== undefined, true);
+      assert.equal(fake.json(`${folder(id)}pickup.json`).host !== undefined, true, 'Round 1 pickup is still there.');
+      assert.equal((await cli(via, 'checklist', 'pickup', id)).code, 3);
+
       const cancelled = await cli(via, 'checklist', 'cancel', shortId);
       assert.equal(cancelled.code, 0, cancelled.stderr);
       assert.deepEqual(Object.keys(fake.json(`${folder(shortId)}cancel.json`)).sort(), ['at', 'by']);

@@ -44,7 +44,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   const [pending, setPending] = useState<Record<string, Pending>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean> | null>(null)
-  const [note, setNote] = useState(() => heldDraft<{ note?: string }>(`checklist-${data.id}`)?.note ?? '')
+  const [note, setNote] = useState(() => heldDraft<{ note?: string }>(`checklist-${data.id}`)?.note ?? data.previous?.note ?? '')
   const [warnedAt, setWarnedAt] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -59,7 +59,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   const target = useTarget()
   const stepsRef = useRef<HTMLElement | null>(null)
   const submitRef = useRef<HTMLElement | null>(null)
-  const report = usePlaytestReport(data.id, data.state === 'open', reload)
+  const report = usePlaytestReport(data.id, data.state === 'open', reload, data.previous)
   const attachHelp = useAttachHelp('checklist', data.id, data.state === 'open')
   const firstGuide = useRef<string | null | undefined>(undefined)
 

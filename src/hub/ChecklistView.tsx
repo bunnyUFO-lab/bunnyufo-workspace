@@ -17,6 +17,7 @@ import GetHelp, { HelpAttachedNote } from './GetHelp'
 import Delivery from './Delivery'
 import { needsHash } from './needsFocus'
 import { PageProjectChip } from './ProjectChip'
+import ReopenButton from './ReopenButton'
 
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
 
@@ -54,8 +55,14 @@ export default function ChecklistView({ id }: { id: string }) {
 
       <SettledBar itemKey={`checklist-${detail.id}`} kind="checklist" id={detail.id} title={text(detail.title)} verb={here.verb} phase={here.phase} backHash={hubHash('checklist', detail.id)} order={here.order} />
       {/* Kept mounted while the answer is held, so Undo finds the ticks and the note as they were left. */}
+      {detail.revision && detail.state === 'open' && (
+        <section className="hub-panel" aria-label="Reopened" data-reopened>
+          <p><b>Reopened {ago(detail.reopen?.at ?? detail.createdAt)}.</b> What you wrote and the pictures you attached are still here. Change what you like and send it again{detail.reopen?.pickedUp ? '; the agent has already read the earlier answer and will be told this one replaces it' : ''}.</p>
+        </section>
+      )}
       <div hidden={here.covered}>
         <ChecklistBody
+          key={detail.revision ?? 1}
           data={detail} loadedAt={loadedAt} reload={reload}
           onSubmitted={() => {
             const verb = detail.kind === 'playtest' ? 'reported' : 'submitted'
@@ -67,7 +74,7 @@ export default function ChecklistView({ id }: { id: string }) {
 
       {submitted && detail.submit && (
         <section className="hub-panel" aria-label="Submitted" data-submitted>
-          <p><b>Submitted {ago(detail.submit.at)}</b>{text(detail.submit.by) ? ` by ${text(detail.submit.by)}` : ''}.</p>
+          <p><b>{detail.revision ? 'Submitted again' : 'Submitted'} {ago(detail.submit.at)}</b>{text(detail.submit.by) ? ` by ${text(detail.submit.by)}` : ''}.</p>
           {detail.kind === 'playtest' && detail.submit.rating && <p data-report-summary>Rating {detail.submit.rating}/5 · {VERDICT_LABEL.find(([value]) => value === detail.submit?.verdict)?.[1] ?? text(detail.submit.verdict)} · {(detail.submit.issues ?? []).length} {(detail.submit.issues ?? []).length === 1 ? 'issue' : 'issues'}</p>}
           {Array.isArray(detail.submit.issues) && detail.submit.issues.length > 0 && (
             <ul className="pt-issues">
@@ -84,6 +91,7 @@ export default function ChecklistView({ id }: { id: string }) {
           {detail.state === 'picked-up' && detail.pickup && <p className="hub-muted">Picked up {ago(detail.pickup.at)}{text(detail.pickup.host) ? ` on ${text(detail.pickup.host)}` : ''}.</p>}
         </section>
       )}
+      {submitted && detail.submit && <ReopenButton id={detail.id} noun={detail.kind === 'playtest' ? 'report' : 'checklist'} pickedUp={detail.state === 'picked-up'} reload={reload} />}
       {submitted && detail.submit && detail.delivery && !detail.pickup && <Delivery noun="checklist" project={detail.project} delivery={detail.delivery} />}
       <p><a className="hub-btn" href={needsHash()}>Back to Needs you</a></p>
     </div>

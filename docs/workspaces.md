@@ -383,6 +383,7 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/checklists/:id/files` | `{ for: "03" \| "issue" \| "note", image: { type: 'image/jpeg' \| 'image/png', data: <base64> } }`: one picture for a step (evidence) or a playtest issue (screenshot), in the chat picture shape and with the chat limits: at most 1.5 MB decoded, 1 to 2048 px a side, the bytes checked against the type (WebP and GIF are 415), EXIF and GPS stripped. Writes one create-only `evidence-<step>-<stamp>-<rand4>.<jpg\|png>` `shot-<stamp>-<rand4>.<jpg\|png>`, or for the note `shot-note-<stamp>-<rand4>.<jpg\|png>` (at most 4) in the list's own folder. 201 `{ file, at }`; 404 for a step the list does not have; 409 unless the list is `open`, beyond 5 pictures for a step or 30 screenshots; the body limit is 8 MB. The detail carries `evidence` (`{ "03": { file, at } }`, the newest per step) and `shots` |
 | `POST /api/hub/checklists/:id/files/:file/delete` | Take back a picture of a list that is still `open` (a name matching `evidence-`, `shot-` or `shot-note-`) |
 | `POST /api/hub/checklists/:id/submit` | `{ note?, pictures? }`: send the list back; `pictures` names the note's pictures that are kept (the rest are deleted). Writes `submit.json` create-only (with the done and open item ids) and then a `checklist-submitted` event; 409 for a cancelled list, and for a second submit (the 409 carries the first `submit`) |
+| `POST /api/hub/checklists/:id/reopen` | Owner only (401 with no signed-in user). Take a `submitted` or `picked-up` list back: writes `reopen-<n>.json` create-only (`n` is the next round, 2 or more), after which the list is `open` again with `revision: n`, `reopen`, and the replaced submission as `previous`. Ticks, the note and every picture stay. 409 for an open or cancelled list, and for a second reopen of the same round. Writes a `checklist-reopened` event |
 | `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
 | `GET /api/hub/reviews/:id` | One review's detail, from its `ready-for-review` event in the last seven days (404 otherwise): title, summary, checked links, `closing` (a sprint-end item: the prompt and what is not done), card files, screenshots in before/after pairs, verdicts, and whether it is `done` |
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }`, or from Spawn `{ project, text, preset, title?, repo?, needs?, target?, doneWhen?, agent?, replaces?, drawing? }`: needs a signed-in user, stores `origin: { kind: owner }` (a body `origin` or `followUp` is ignored) and the routed `target`, and answers `{ id, target, why }` (see Requests) |
@@ -672,12 +673,25 @@ State comes from file names alone, so a folder listing is enough. The list's sta
 is `cancelled`, `pickup.json` is `picked-up`, `submit.json` is `submitted`, else `open`. An item is done when its
 mark file with the greatest stamp in the name (the greater `<rand4>` on a tie; never S3's `LastModified`) is a `tick`.
 Progress is the done items over `items.length`. An `open` list is in Needs you even when every item is ticked, because
-Submit is the hand-back; the Inbox's **To do** filter lists every list but the cancelled ones, open first. Ticking
+Submit is the hand-back; the owner can take it back with **Reopen to edit** on the sent list (see below); the Inbox's **To do** filter lists every list but the cancelled ones, open first. Ticking
 after Submit is refused (409), so the agent acts on what was submitted. A list is found while its id falls in this
 month or the last, like an Ask.
 
-Two events go to the Activity feed: `checklist-created` (from the CLI) and `checklist-submitted` (from the Hub, after
-`submit.json`). Nothing derives a checklist's state from events. The card API refuses ticks, unticks and `submit.json`
+### Reopening a sent checklist
+
+Submit stays final for the round it ends, but the owner can reopen a sent list to change an answer. The Hub writes
+`reopen-<n>.json` create-only (the next round `n`, from 2); nothing is overwritten. Round 1 keeps its names (`submit.json`,
+`pickup.json`); round `n` uses `submit-<n>.json` (the Hub) and `pickup-<n>.json` (the agent), so a list with no `reopen-*`
+file reads exactly as before. The state comes from the latest round's files: after a reopen the list is `open` again, even
+when an agent had picked the first submission up. The ticks, the note (prefilled from the earlier submission) and every
+picture stay. An agent that already picked up the answer sees, on `cards checklist get` or `list`, state `open` with
+`revision n` and the replaced submission as `previous`; `cards checklist wait` waits for the new submission, and
+`cards checklist pickup` writes `pickup-<n>.json`. Only the Hub writes `reopen-*` and `submit-<n>.json` (the card API
+refuses them for a limited token), so an agent cannot reopen a list; the route needs a signed-in owner (401 otherwise).
+The `delivered.json` and `watch-*.json` files an agent wrote before the reopen are not shown for the new round.
+
+Three events go to the Activity feed: `checklist-created` (from the CLI), `checklist-submitted` (from the Hub, after
+`submit.json`, or `submit-<n>.json` with a `revision`) and `checklist-reopened`. Nothing derives a checklist's state from events. The card API refuses ticks, unticks and `submit.json`
 from a limited token (they are the Hub's) and lets one create `checklist.json` only with `If-None-Match: *`.
 
 ### Design reviews

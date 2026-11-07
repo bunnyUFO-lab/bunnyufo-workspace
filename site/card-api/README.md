@@ -234,7 +234,7 @@ Every route but `GET /cards.mjs` (the client, which holds nothing secret) needs
 
 What it refuses:
 - in the `inbox` section, `asks/*/answer.*`, `asks/*/snooze.json`, `requests/*/declined.json` and, in
-  `checklists/*/`, the `tick-*` and `untick-*` files and `submit.json`, from any token whose `write` right is limited: only the Hub (through the site API) or the
+  `checklists/*/`, the `tick-*` and `untick-*` files, `submit.json`, `submit-<n>.json` and `reopen-<n>.json`, from any token whose `write` right is limited: only the Hub (through the site API) or the
   passphrase writes answers. `ask.json`, `checklist.json`, `delivered.json` and `watch-*.json` (the delivery files in an Ask's or a checklist's folder) are create-only for such a token
   (`If-None-Match: *`, never an upload URL), and it cannot delete any of these files
 - in the `inbox` and `inbox-dev` sections, for a limited `write` right, the files only the Hub writes (same 403, same

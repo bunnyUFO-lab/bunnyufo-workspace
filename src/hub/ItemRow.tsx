@@ -10,7 +10,7 @@ import { nothingToDo } from './reviewText'
 
 const EVENT_DOT: Record<string, string> = {
   'session-started': 'g', 'session-ended': 'g', blocked: 'y', 'ready-for-review': 'p', 'pr-opened': 'b', 'pr-merged': 'g', 'pr-closed': 'y',
-  'ci-failed': 'r', 'ci-passed': 'g', deployed: 'b', 'ask-created': 'p', alert: 'r', 'review-done': 'g', resumed: 'g', 'checklist-created': 'p', 'checklist-submitted': 'g', 'run-started': 'g', 'run-finished': 'b', 'profile-change': 'g', 'profile-change-sent': 'b',
+  'ci-failed': 'r', 'ci-passed': 'g', deployed: 'b', 'ask-created': 'p', alert: 'r', 'review-done': 'g', resumed: 'g', 'checklist-created': 'p', 'checklist-submitted': 'g', 'checklist-reopened': 'p', 'run-started': 'g', 'run-finished': 'b', 'profile-change': 'g', 'profile-change-sent': 'b',
 }
 
 const KIND_LABEL: Record<string, string> = { ask: 'Ask', checklist: 'To do', request: 'Request', review: 'Review', blocked: 'Blocked', session: 'Running' }

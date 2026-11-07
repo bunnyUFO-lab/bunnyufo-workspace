@@ -131,8 +131,10 @@
 //        shot-….png|jpg per playtest issue, shot-note-….png|jpg for the note) are downloaded as above and their paths printed; --into <dir> picks the folder
 //        (and downloads them before the list is submitted too)
 //   cards checklist wait <id> [--timeout <minutes, 30, max 240>] [--every <seconds, 20, min 5>]
-//        exit 0 on submit (prints what get prints), 3 on cancel, 4 on timeout
-//   cards checklist pickup <id>     exit 2 when not submitted, 3 when already picked up
+//        exit 0 on submit (prints what get prints; a reopened list is waited on again), 3 on cancel, 4 on timeout
+//   cards checklist pickup <id>     exit 2 when not submitted, 3 when already picked up. The owner may reopen a submitted list to change it: it is then `open` again
+//        with `revision n` (list and get print it, and get keeps the replaced submission as `previous`), `wait` waits for the new submission, and pickup
+//        writes pickup-<n>.json for it, so an answer you already picked up is never mistaken for the new one.
 //   cards checklist cancel <id>     exit 3 when already cancelled or submitted
 //   cards request list [--project <p>] [--open | --approved] [--target pc|cloud|hermes]   --approved: signed, not yet taken, not stopped, declined, finished or expired
 //   cards request take <id> --bead <b>                                exit 3 when already taken; exit 4 for a request with a
@@ -708,7 +710,7 @@ async function put(folder, section, id, dryRun, { agent, why, context, edit = fa
 // The inbox: events, Asks, requests and Beads copies, all files in the hidden `inbox` section.
 // ---------------------------------------------------------------------------------------------
 
-const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'pr-closed', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert', 'review-done', 'resumed', 'checklist-created', 'checklist-submitted'];
+const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'pr-closed', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert', 'review-done', 'resumed', 'checklist-created', 'checklist-submitted', 'checklist-reopened'];
 const WHEN = ['next-sprint', 'nightly', 'record'];
 // The handler's filter on file names; checked here too, so a bad name fails before it is sent.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -1630,16 +1632,32 @@ async function claim(folder, id, file, body) {
 const pickupBody = flags => ({ at: isoNow(), ...(sessionEnv() ? { session: sessionEnv() } : {}), host: hostName(), ...(flags.bead ? { bead: flags.bead } : {}) });
 
 // --- Checklists: a list of steps for the owner, ticked one at a time in the Hub ---
-// checklists/<id>/: checklist.json (this command), tick-/untick-<item>-<stamp>-<rand4>.json and submit.json (the Hub only),
-// pickup.json and cancel.json (this command). The state is read from the file names alone.
+// checklists/<id>/: checklist.json (this command), tick-/untick-<item>-<stamp>-<rand4>.json, submit.json and reopen-<n>.json (the Hub only),
+// pickup.json and cancel.json (this command). The state is read from the file names alone. The owner may reopen a submitted list: that starts
+// round n with `reopen-<n>.json`, and the round's files are `submit-<n>.json` (Hub) and `pickup-<n>.json` (this command); round 1 keeps the plain names.
 
 const CHECKLIST_MARK_RE = /^(tick|untick)-(\d{2})-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.json$/;
 const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, command: 2000, context: 4000, link: 2000, file: 256 * 1024, build: 2000, lookFor: 2000 };
 const ITEM_SHELLS = ['bash', 'powershell', 'cmd'];
 const PLAYTEST_PLATFORMS = ['web', 'windows', 'mac', 'linux', 'android', 'ios'];
 
-/** cancel.json → cancelled, pickup.json → picked-up, submit.json → submitted, else open. */
-const checklistState = names => (names.has('cancel.json') ? 'cancelled' : names.has('pickup.json') ? 'picked-up' : names.has('submit.json') ? 'submitted' : 'open');
+/** The round a list is in: the greatest n of a reopen-<n>.json (2 or more), else 1. Keep equal to checklistRevision in site/api/hub-model.mjs. */
+function checklistRevision(names) {
+  let revision = 1;
+  for (const name of names) {
+    const match = /^reopen-(\d{1,2})\.json$/.exec(name);
+    if (match && Number(match[1]) > revision) revision = Number(match[1]);
+  }
+  return revision;
+}
+/** submit.json / pickup.json in round 1, submit-<n>.json / pickup-<n>.json after a reopen. */
+const roundFile = (kind, revision) => (revision > 1 ? `${kind}-${revision}.json` : `${kind}.json`);
+
+/** cancel.json → cancelled, the round's pickup → picked-up, its submit → submitted, else open (a reopened list is open again). */
+const checklistState = names => {
+  const revision = checklistRevision(names);
+  return names.has('cancel.json') ? 'cancelled' : names.has(roundFile('pickup', revision)) ? 'picked-up' : names.has(roundFile('submit', revision)) ? 'submitted' : 'open';
+};
 
 /** The winning mark per item: the greatest stamp in the file name, the greater rand4 on a tie. → Map<item, { done, at }> */
 function checklistMarks(names) {
@@ -1967,7 +1985,11 @@ async function checklistRead(id) {
   const marks = checklistMarks(names);
   const items = checklist.items.map(item => ({ id: item.id, text: item.text, ...(typeof item.command === 'string' ? { command: item.command } : {}), done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) }));
   const read = async name => (names.has(name) ? readJson(inboxPath('checklists', id, name)) : undefined);
-  const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
+  const revision = checklistRevision(names);
+  const [submit, pickup, cancel, reopen, previous] = await Promise.all([
+    read(roundFile('submit', revision)), read(roundFile('pickup', revision)), read('cancel.json'),
+    revision > 1 ? read(`reopen-${revision}.json`) : undefined, revision > 1 ? read(roundFile('submit', revision - 1)) : undefined,
+  ]);
   // The newest picture per step, and the playtest screenshots, from the file names alone.
   const evidence = {};
   const every = {};
@@ -1982,6 +2004,8 @@ async function checklistRead(id) {
   for (const item of items) if (evidence[item.id]) { item.evidence = evidence[item.id]; if (every[item.id].length > 1) item.pictures = every[item.id]; }
   const view = {
     checklist, state: checklistState(names), done: items.filter(item => item.done).length, total: items.length, items, ...(shots.length ? { shots } : {}), ...(notePictures.length ? { notePictures } : {}),
+    // After a reopen: the round, when the owner reopened, and the submission it replaces (what an agent may already have acted on).
+    ...(revision > 1 ? { revision, ...(reopen ? { reopen } : {}), ...(previous ? { previous } : {}) } : {}),
     ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
   };
   // Not part of the printed or JSON view: what `--into` downloads.
@@ -1994,8 +2018,12 @@ const minute = iso => `${iso.slice(0, 10)} ${iso.slice(11, 16)}Z`;
 function printChecklist(view, asJson) {
   if (asJson) { console.log(JSON.stringify(view, null, 2)); return; }
   const { checklist, state, done, total, items } = view;
-  console.log([checklist.id, state, `${done} of ${total} done`, checklist.project].join('\t'));
+  console.log([checklist.id, state, `${done} of ${total} done`, checklist.project, ...(view.revision ? [`revision ${view.revision}`] : [])].join('\t'));
   console.log(checklist.title);
+  if (view.revision) {
+    const picked = view.previous && view.reopen?.pickedUp ? ' An earlier answer was picked up: act on the changes, not on that one.' : '';
+    console.log(`(reopened by the owner${view.reopen?.at ? ` ${minute(view.reopen.at)}` : ''}: this is revision ${view.revision}, and it replaces the earlier submission, kept below as previous.${picked}${state === 'open' ? ' The owner is editing it; wait for the new submission.' : ''})`);
+  }
   for (const item of items) {
     console.log(`${item.done ? '[x]' : '[ ]'} ${item.id} ${item.text}${item.done && item.at ? `  (${minute(item.at)})` : ''}`);
     if (item.command) console.log(item.command.split('\n').map(line => `     $ ${line}`).join('\n'));
@@ -2012,7 +2040,9 @@ function printChecklist(view, asJson) {
       issues.forEach((issue, index) => console.log(`  ${index + 1}. ${String(issue?.text ?? '').replace(/\s+/g, ' ')}${issue?.shot ? ` [${issue.shot}]` : ''}`));
     }
   }
-  for (const name of ['submit', 'pickup', 'cancel']) if (view[name]) console.log(`== ${name}.json\n${JSON.stringify(view[name], null, 2)}`);
+  if (view.reopen) console.log(`== reopen-${view.revision}.json\n${JSON.stringify(view.reopen, null, 2)}`);
+  if (view.previous) console.log(`== previous submission (revision ${view.revision - 1}, replaced)\n${JSON.stringify(view.previous, null, 2)}`);
+  for (const name of ['submit', 'pickup', 'cancel']) if (view[name]) console.log(`== ${name}${view.revision && name !== 'cancel' ? `-${view.revision}` : ''}.json\n${JSON.stringify(view[name], null, 2)}`);
 }
 
 async function checklistCreate(flags) {
@@ -2064,9 +2094,9 @@ async function checklistList(flags) {
     if (!checklist || !Array.isArray(checklist.items)) return null;
     const marks = checklistMarks(names);
     const done = checklist.items.filter(item => marks.get(item.id)?.done).length;
-    return { id, state, done, total: checklist.items.length, project: checklist.project ?? '', title: clip(checklist.title, 80) };
+    return { id, state, done, total: checklist.items.length, project: checklist.project ?? '', title: clip(checklist.title, 80), revision: checklistRevision(names) };
   });
-  for (const row of rows) if (row && (!flags.project || row.project === flags.project)) console.log([row.id, row.state, `${row.done}/${row.total}`, row.project, row.title].join('\t'));
+  for (const row of rows) if (row && (!flags.project || row.project === flags.project)) console.log([row.id, row.state, `${row.done}/${row.total}`, row.project, row.title, ...(row.revision > 1 ? [`revision ${row.revision}`] : [])].join('\t'));
 }
 
 /** A submitted list: every picture of it is downloaded and its full paths printed, with no flag. */
@@ -2143,7 +2173,7 @@ async function checklistPickup(id) {
   const state = checklistState(names);
   if (state === 'picked-up') { console.error(`checklists/${id} was picked up already.`); throw new Exit(3); }
   if (state !== 'submitted') { console.error(`checklists/${id} is ${state}, not submitted: nothing to pick up.`); throw new Exit(2); }
-  return claim('checklists', id, 'pickup.json', { at: isoNow(), host: hostName(), ...(sessionEnv() ? { session: sessionEnv() } : {}) });
+  return claim('checklists', id, roundFile('pickup', checklistRevision(names)), { at: isoNow(), host: hostName(), ...(sessionEnv() ? { session: sessionEnv() } : {}) });
 }
 
 /** Withdraw a list that is still open: exit 3 when it was cancelled or submitted already. */

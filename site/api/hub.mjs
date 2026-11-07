@@ -19,7 +19,7 @@ import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, NOTE_SHOT_RE, ANSWER_PICTURE_RE, ANSWER_PICTURES_MAX, NOTE_PICTURES_MAX, takesPictures, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, subCounts, inboxFilter, needsKindOf, askSubtype, stepsSubtype, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, NOTE_SHOT_RE, ANSWER_PICTURE_RE, ANSWER_PICTURES_MAX, NOTE_PICTURES_MAX, takesPictures, SHOTS_PER_CHECKLIST, checklistState, checklistRevision, checklistRoundFile, CHECKLIST_MAX_REVISION, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, subCounts, inboxFilter, needsKindOf, askSubtype, stepsSubtype, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { FEEDBACK_HOME, FEEDBACK_ID_RE, FEEDBACK_KINDS, checkNotUseful, feedbackIdOf, notUsefulRecord, reasonTextOf, recordPath } from './hub-feedback.mjs';
@@ -855,12 +855,14 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
    * item's folder, read fresh (another writer's token may have replaced them), checked by `deliveryOf`. Nothing when there is
    * no answer yet.
    */
-  async function deliveryFor(folderPath, names, answer, at) {
+  async function deliveryFor(folderPath, names, answer, at, since = null) {
     if (!answer) return undefined;
     const watchNames = [...names].filter(name => /^watch-[A-Za-z0-9_-]{1,40}\.json$/.test(name)).sort().slice(0, DELIVERY_WATCHERS);
     const readFresh = async name => (names.has(name) ? (await fresh(`${folderPath}/${name}`))?.value : undefined);
     const [delivered, ...watchers] = await Promise.all([readFresh('delivered.json'), ...watchNames.map(readFresh)]);
-    return deliveryOf({ answer, delivered, watchers, at });
+    // A reopened checklist is delivered again: what an agent wrote before the reopen is about the earlier submission.
+    const current = body => (since === null || !(Date.parse(body?.at) < since) ? body : undefined);
+    return deliveryOf({ answer, delivered: current(delivered), watchers: watchers.filter(body => current(body) !== undefined), at });
   }
 
   /** The title Beads has for the open Wayfinder question a decision Ask would decide, or ''. It comes from Beads, never from the Ask. */
@@ -938,11 +940,15 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   async function checklistDetail(id, at = now()) {
     const { checklist, names } = await checklistFolder(id);
     const state = checklistState(names);
+    const revision = checklistRevision(names);
     const { done, total, marks } = checklistProgress(checklist, names);
     const read = async name => (names.has(name) ? cached(`checklists/${id}/${name}`) : undefined);
-    const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
+    const [submit, pickup, cancel, reopen, previous] = await Promise.all([
+      read(checklistRoundFile('submit', revision)), read(checklistRoundFile('pickup', revision)), read('cancel.json'),
+      revision > 1 ? read(`reopen-${revision}.json`) : undefined, revision > 1 ? read(checklistRoundFile('submit', revision - 1)) : undefined,
+    ]);
     const pictures = checklistEvidence(names);
-    const delivery = await deliveryFor(`checklists/${id}`, names, submit, at);
+    const delivery = await deliveryFor(`checklists/${id}`, names, submit, at, revision > 1 ? Date.parse(reopen?.at) || null : null);
     const sub = stepsSubtype(checklist);
     return {
       ...checklist, state, done, total,
@@ -952,6 +958,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       evidenceFiles: evidenceFiles(names),
       ...(notePictureNames(names).length ? { notePictures: notePictureNames(names) } : {}),
       items: checklist.items.map(item => ({ ...item, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) })),
+      ...(revision > 1 ? { revision, ...(reopen ? { reopen } : {}), ...(previous ? { previous } : {}) } : {}),
       ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       ...(delivery ? { delivery } : {}),
       files: [...names].sort(),
@@ -1067,7 +1074,9 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   async function submitChecklist(id, data, user, at) {
     const { checklist, names } = await checklistFolder(id);
     const state = checklistState(names);
-    const existing = async () => (await fresh(`checklists/${id}/submit.json`))?.value ?? null;
+    const revision = checklistRevision(names);
+    const submitFile = checklistRoundFile('submit', revision);
+    const existing = async () => (await fresh(`checklists/${id}/${submitFile}`))?.value ?? null;
     if (state === 'cancelled') throw fail('The agent withdrew this checklist.', 409);
     if (state !== 'open') throw fail('This checklist is already submitted.', 409, { submit: await existing() });
     const note = data.note;
@@ -1090,24 +1099,60 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       ...(help ? { help } : {}),
     };
     try {
-      await bucket.put(key(`checklists/${id}/submit.json`), `${JSON.stringify(submit, null, 2)}\n`, { contentType: 'application/json', ifNoneMatch: '*' });
+      await bucket.put(key(`checklists/${id}/${submitFile}`), `${JSON.stringify(submit, null, 2)}\n`, { contentType: 'application/json', ifNoneMatch: '*' });
     } catch (error) {
       if (error.status !== 412) throw error;
       throw fail('This checklist is already submitted.', 409, { submit: await existing() });
     }
-    cache.delete(key(`checklists/${id}/submit.json`));
+    cache.delete(key(`checklists/${id}/${submitFile}`));
     // A note picture the submission does not name was taken out in another tab: it never reaches an agent.
     for (const name of notePictureNames(names)) if (!pictures.includes(name)) await bucket.del(key(`checklists/${id}/${name}`)).catch(() => {});
     const event = {
       ts: at.toISOString(), kind: 'checklist-submitted', project: checklist.project, checklist: id, host: 'hub', source: 'hub', by: user || 'local',
-      title: `Submitted: ${clip(checklist.title, 80)}`, summary: report ? `Rating ${report.rating}/5 · ${PLAYTEST_VERDICTS[report.verdict]} · ${report.issues.length} ${report.issues.length === 1 ? 'issue' : 'issues'}` : `${doneCount} of ${total} done`,
+      ...(revision > 1 ? { revision } : {}),
+      title: `${revision > 1 ? 'Submitted again' : 'Submitted'}: ${clip(checklist.title, 80)}`, summary: report ? `Rating ${report.rating}/5 · ${PLAYTEST_VERDICTS[report.verdict]} · ${report.issues.length} ${report.issues.length === 1 ? 'issue' : 'issues'}` : `${doneCount} of ${total} done`,
     };
     try {
       await putHubEvent(event, at);
     } catch (error) {
       log(`[hub] checklist ${id} was submitted but its event was not written: ${error.message}`);
     }
-    return { status: 201, body: { state: 'submitted', submit } };
+    return { status: 201, body: { state: 'submitted', submit, ...(revision > 1 ? { revision } : {}) } };
+  }
+
+  /**
+   * Take a submitted checklist back for editing: the create-only `reopen-<n>.json` starts round n. The ticks, the pictures and the
+   * earlier submission stay where they are; the next Submit writes `submit-<n>.json` beside the first one. Owner only (the route needs
+   * a signed-in user, and an agent's token may not write `reopen-*`). A second reopen of the same round loses the race with a 409.
+   */
+  async function reopenChecklist(id, user, at) {
+    if (!user) throw fail('Sign in to reopen this.', 401);
+    const { checklist, names } = await checklistFolder(id);
+    const state = checklistState(names);
+    if (state === 'cancelled') throw fail('The agent withdrew this checklist.', 409);
+    if (state === 'open') throw fail('This checklist is not submitted, so there is nothing to reopen.', 409);
+    const from = checklistRevision(names);
+    const revision = from + 1;
+    if (revision > CHECKLIST_MAX_REVISION) throw fail('This checklist has been reopened too many times.', 409);
+    const submitted = await fresh(`checklists/${id}/${checklistRoundFile('submit', from)}`);
+    const body = { at: at.toISOString(), by: user, revision, ...(submitted?.value?.at ? { submittedAt: submitted.value.at } : {}), pickedUp: names.has(checklistRoundFile('pickup', from)) };
+    try {
+      await bucket.put(key(`checklists/${id}/reopen-${revision}.json`), `${JSON.stringify(body, null, 2)}\n`, { contentType: 'application/json', ifNoneMatch: '*' });
+    } catch (error) {
+      if (error.status !== 412) throw error;
+      throw fail('Someone reopened this checklist already.', 409);
+    }
+    cache.delete(key(`checklists/${id}/reopen-${revision}.json`));
+    const event = {
+      ts: at.toISOString(), kind: 'checklist-reopened', project: checklist.project, checklist: id, host: 'hub', source: 'hub', by: user, revision,
+      title: `Reopened: ${clip(checklist.title, 80)}`, summary: body.pickedUp ? 'The owner is changing an answer an agent already picked up.' : 'The owner is changing the submission.',
+    };
+    try {
+      await putHubEvent(event, at);
+    } catch (error) {
+      log(`[hub] checklist ${id} was reopened but its event was not written: ${error.message}`);
+    }
+    return { status: 201, body: { state: 'open', revision, reopen: body } };
   }
 
   /** A create-only mark file `bead-marks/<project>/<bead>/<stamp>-<verdict>-<rand4>.json`, a new name on a clash, three tries. */
@@ -2262,6 +2307,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
           send(await putChecklistFile(decodeURIComponent(match[1]), raw, at));
         } else if ((match = /^\/hub\/checklists\/([^/]+)\/submit$/.exec(route))) {
           send(await submitChecklist(decodeURIComponent(match[1]), raw, user, at));
+        } else if ((match = /^\/hub\/checklists\/([^/]+)\/reopen$/.exec(route))) {
+          send(await reopenChecklist(decodeURIComponent(match[1]), user, at));
         } else if (route === '/hub/alerts/dismiss' || route === '/hub/alerts/restore') {
           send(await markAlerts(route.endsWith('dismiss') ? 'alert-dismissed' : 'alert-restored', raw, user, at));
         } else if ((match = /^\/hub\/reviews\/([^/]+)\/done$/.exec(route))) {
