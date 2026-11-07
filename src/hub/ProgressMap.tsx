@@ -582,7 +582,7 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
           </div>
         )}
       </div>
-      {shownId && <MapPanel model={panelModel ?? fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} hiddenBy={find(model, shownId) || (panelModel && !find(fullModel, shownId)) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
+      {shownId && <MapPanel model={panelModel ?? fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} onMap hiddenBy={find(model, shownId) || (panelModel && !find(fullModel, shownId)) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
     </>
   )
 }

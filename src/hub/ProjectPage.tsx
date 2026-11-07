@@ -314,11 +314,7 @@ export default function ProjectPage({ project: wanted, route, view: viewProp, sp
             </div>
           </div>
         )}
-      {shown && model && (
-        <div className="wk-sheet">
-          <MapPanel model={model} nodeId={shown} onClose={closeNode} onOpen={openRelated} headerExtra={<p className="hub-map-panel-roadmap"><a href={mapHash(project, shown, sprint)} data-show-on-roadmap>Show on map</a></p>} />
-        </div>
-      )}
+      {shown && model && <MapPanel model={model} nodeId={shown} onClose={closeNode} onOpen={openRelated} />}
     </div>
   )
 }

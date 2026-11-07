@@ -427,12 +427,17 @@ try {
   assert.ok((await page.locator('[data-node="ml-wj-t2"]').getAttribute('aria-label')).startsWith(wallTitle), 'The aria-label keeps the full title.');
   await page.unroute('**/api/hub/map/magic-loops');
 
+  // The details window is modal: the map behind it is reached again after it is closed.
+  const collapseMap = async target => {
+    if (await target.locator('dialog#hub-map-panel').count()) { await target.keyboard.press('Escape'); await target.locator('dialog#hub-map-panel').waitFor({ state: 'detached' }); }
+    await target.locator('button:has-text("Collapse")').click();
+  };
   step('map: tapping a milestone opens its panel; the chevron alone expands');
   const panel = page.locator('.hub-map-panel');
   const fCount = () => page.locator('[data-kind="f"]').count();
   // A tap on a node, sent straight to it: a map that glides to the last node it opened leaves the next one anywhere, and the real taps are checked on their own below.
   const clickNode = id => page.locator(`[data-node="${id}"] > circle`).first().dispatchEvent('click');
-  await page.locator('button:has-text("Collapse")').click();
+  await collapseMap(page);
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 0);
   await go(page, '#/~hub/map/magic-loops');
   await panel.waitFor({ state: 'detached' });
@@ -492,18 +497,18 @@ try {
   await page.locator('[data-kind="f"]').waitFor();
   assert.equal(await panel.count(), 0, 'Space on the chevron opened no panel.');
 
-  step('map: after a tap, the node is inside the free part of the box, clear of the side panel');
+  step('map: after a tap, the node is inside the box');
   await page.locator('button:has-text("Expand all")').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 9);
   await go(page, '#/~hub/map/magic-loops/ml-m3');
   await panel.waitFor();
   await page.waitForTimeout(400);
   const [cleared, side, frame] = await Promise.all([page.locator('[data-node="ml-m3"] > circle').first().boundingBox(), panel.boundingBox(), page.locator('.hub-map-box').boundingBox()]);
-  assert.ok(cleared.x + cleared.width <= side.x, `The node is clear of the panel (${cleared.x + cleared.width} > ${side.x}).`);
+  assert.ok(side.width > 0, 'The window is open; it is centred over the dimmed map and leaves no strip, so the node only has to be inside the box.');
   assert.ok(cleared.x >= frame.x && cleared.y >= frame.y && cleared.y + cleared.height <= frame.y + frame.height, `The node is inside the box (${JSON.stringify([cleared, frame])}).`);
   await page.keyboard.press('Escape');
   await panel.waitFor({ state: 'detached' });
-  await page.locator('button:has-text("Collapse")').click();
+  await collapseMap(page);
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
 
   step('map: a deep link opens the panel; Back closes it');
@@ -527,12 +532,14 @@ try {
   await panel.waitFor();
   const taskText = await panel.innerText();
   assert.ok(taskText.includes('Wall-jump animation') && taskText.includes('Open PR'));
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
   await page.locator('button:has-text("Expand all")').click();
   await clickNode('ml-m3');
   await page.waitForFunction(() => document.querySelector('.hub-map-panel h3')?.textContent.includes('Milestone 3'));
   await page.waitForTimeout(200);
-  const [nodeBox, panelBox] = await Promise.all([page.locator('[data-node="ml-m3"] > circle').first().boundingBox(), panel.boundingBox()]);
-  assert.ok(nodeBox.x + nodeBox.width <= panelBox.x, `The panel leaves the selected node in view (${nodeBox.x + nodeBox.width} > ${panelBox.x}).`);
+  const [nodeBox, mapBox] = await Promise.all([page.locator('[data-node="ml-m3"] > circle').first().boundingBox(), page.locator('.hub-map-box').boundingBox()]);
+  assert.ok(nodeBox.x >= mapBox.x && nodeBox.x + nodeBox.width <= mapBox.x + mapBox.width, 'The selected node stays in view.');
   await page.keyboard.press('Escape');
   await panel.waitFor({ state: 'detached' });
 
@@ -571,7 +578,7 @@ try {
   await page.locator('button:has-text("Expand all")').click();
 
   step('map: Collapse removes the tasks, Expand all shows every task of every milestone');
-  await page.locator('button:has-text("Collapse")').click();
+  await collapseMap(page);
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 0);
   await page.locator('button:has-text("Expand all")').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 9);
@@ -589,7 +596,7 @@ try {
   const expanded = id => page.locator(`[data-toggle="${id}"]`).getAttribute('aria-expanded');
   /** Collapsed, fitted and zoomed out below the opening threshold, so a zoom in has something to open. */
   const fresh = async () => {
-    await page.locator('button:has-text("Collapse")').click();
+    await collapseMap(page);
     await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
     await page.locator('button:has-text("Fit")').click();
     while ((await viewOf(page))[2] > 1.3) await page.locator('[aria-label="Zoom out"]').click();
@@ -748,7 +755,7 @@ try {
   assert.equal(await expanded('ml-m2'), 'true');
   await page.keyboard.press('Escape');
   await page.locator('.hub-map-panel').waitFor({ state: 'detached' });
-  await page.locator('button:has-text("Collapse")').click();
+  await collapseMap(page);
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
   await page.locator('button:has-text("Fit")').click();
 
@@ -770,14 +777,14 @@ try {
   assert.equal(await panel.count(), 0, 'A drag that starts on a node opens nothing either (the click is swallowed).');
   await page.locator('button:has-text("Fit")').click();
 
-  step('map: a real tap on a milestone opens it, and it glides clear of the panel');
+  step('map: a real tap on a milestone opens it, and the node stays in the box');
   const tapAt = await centreOf(page.locator('[data-node="ml-m2"] > circle').first());
   await page.mouse.click(tapAt.x, tapAt.y);
   await panel.waitFor();
   await page.waitForTimeout(400);
   assert.ok((await page.evaluate(() => location.hash)).endsWith('/magic-loops/ml-m2'));
   const [tapped, sideAfter] = await Promise.all([centreOf(page.locator('[data-node="ml-m2"] > circle').first()), panel.boundingBox()]);
-  assert.ok(tapped.x < sideAfter.x && tapped.x > frameBox.x, `The tapped node is in the free part (${tapped.x} vs panel at ${sideAfter.x}).`);
+  assert.ok(tapped.x > frameBox.x && sideAfter.width > 0, `The tapped node is in the box (${tapped.x}).`);
   await page.keyboard.press('Escape');
   await panel.waitFor({ state: 'detached' });
 
@@ -798,7 +805,7 @@ try {
   const room = await page.evaluate(() => ({ top: document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom }));
   const roomMid = ((room.top ? room.top + 8 : frameNow.y) + room.bottom) / 2;
   assert.ok(Math.abs(now.x - (frameNow.x + frameNow.width / 2)) < 3 && Math.abs(now.y - roomMid) < 3, `Now is in the middle of the room the map has (${now.x},${now.y} vs ${roomMid}).`);
-  await page.locator('button:has-text("Collapse")').click();
+  await collapseMap(page);
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
 
   step('map: with nothing done, "now" is not under the milestone');
@@ -862,7 +869,7 @@ try {
   await big.locator('.hub-map-panel').waitFor();
   await big.waitForTimeout(400);
   const [bigNode, bigSide] = await Promise.all([big.locator('[data-node="ml-m2"] > circle').first().boundingBox(), big.locator('.hub-map-panel').boundingBox()]);
-  assert.ok(bigNode.x + bigNode.width <= bigSide.x, `The tapped node ends clear of the panel (${bigNode.x + bigNode.width} > ${bigSide.x}).`);
+  assert.ok(bigNode.x >= 0 && bigNode.x + bigNode.width <= 1920 && bigSide.width > 0, 'The tapped node stays on the screen.');
   await big.keyboard.press('Escape');
   await big.context().close();
 

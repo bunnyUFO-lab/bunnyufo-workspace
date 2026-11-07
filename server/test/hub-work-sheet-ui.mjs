@@ -1,5 +1,5 @@
 // Run after npm run build. A Work card opens the item's details in place, through a real browser over the fixture
-// service: a Beads card opens the Roadmap's panel over the board (a side panel on a desktop, a bottom sheet at 390 px),
+// service: a Beads card opens the Roadmap's panel over the board (a centred window on a desktop, a bottom sheet at 390 px),
 // the address is #/~hub/work/<board>/<id>, Escape and Back close it, a shared link opens it and closes onto the board,
 // "Show on roadmap" goes to the Roadmap, a Working now chip opens it, the All board opens a card from another project,
 // an unknown id shows the note and no sheet, and request cards still open what they did.
@@ -66,21 +66,18 @@ try {
     assert.equal(await hashOf(page), '#/~hub/work/lanes/ws-ready');
     assert.equal(await page.locator('[data-focused="true"]').getAttribute('data-card'), 'bead:ws-ready', 'The card stays highlighted while its sheet is open.');
     assert.equal(await page.evaluate(() => document.activeElement?.id), 'hub-map-panel-title', 'The focus moves into the sheet.');
-    assert.equal(await page.locator('[data-show-on-roadmap]').getAttribute('href'), '#/~hub/map/lanes/ws-ready');
+    assert.equal(await page.locator('[data-show-on-roadmap]').getAttribute('href'), '#/~hub/project/lanes/at/ws-ready');
+    assert.equal(await page.locator('[data-show-on-work]').count(), 1, 'A task has a link to its own board card too.');
 
-    step(`${label}: the sheet is ${phone ? 'a bottom sheet' : 'a 420 px side panel with the lanes beside it'}`);
+    step(`${label}: the sheet is ${phone ? 'a bottom sheet' : 'a 680 px window centred over the dimmed board'}`);
     const box = await panelOf(page).boundingBox();
     if (phone) {
       assert.ok(Math.abs(box.y + box.height - viewport.height) <= 1 && Math.abs(box.width - viewport.width) <= 1, `A bottom sheet across the width (${JSON.stringify(box)}).`);
       assert.ok(box.height <= viewport.height * 0.76, 'No taller than three quarters of the screen.');
     } else {
-      assert.ok(Math.abs(box.width - 420) <= 1, `About 420 px wide (${box.width}).`);
-      const rail = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hub-rail')) || 0);
-      assert.ok(Math.abs(box.x + box.width - (viewport.width - rail)) <= 1, `At the right edge, beside the tool rail (${JSON.stringify(box)}, rail ${rail}).`);
-      assert.ok(box.height >= viewport.height - 80, 'Full height under the top bar.');
-      const lanes = await page.locator('.wk-lanes').boundingBox();
-      assert.ok(lanes.x + lanes.width <= box.x + 1, 'The lanes sit beside the panel, not under it.');
-      assert.equal(await page.locator('.hub-map-scrim').evaluate(element => getComputedStyle(element).display), 'none', 'No scrim on a desktop: the board stays usable.');
+      assert.ok(Math.abs(box.width - 680) <= 1, `680 px wide (${box.width}).`);
+      assert.ok(Math.abs(box.x + box.width / 2 - viewport.width / 2) <= 1 && Math.abs(box.y + box.height / 2 - viewport.height / 2) <= 1, `Centred on the screen (${JSON.stringify(box)}).`);
+      assert.equal(await page.locator('.hub-map-scrim').evaluate(element => getComputedStyle(element).display), 'block', 'The screen behind is dimmed.');
     }
     await noSideways(page, `Work sheet at ${label} width`);
     if (process.env.BUW_SHOTS) await page.screenshot({ path: `${process.env.BUW_SHOTS}-sheet-${label}.png` });
@@ -109,18 +106,14 @@ try {
     await atBoard(page, '#/~hub/work/lanes');
     await panelOf(page).waitFor({ state: 'detached' });
 
-    step(`${label}: another card while one is open swaps the sheet without stacking history`);
+    step(`${label}: a card opened after closing one is a fresh sheet, and closing it lands on the board`);
     await clickCard(page, 'bead:ws-ready');
     await titled(page, 'Ready to start').waitFor();
-    if (phone) {
-      // The scrim covers the board on a phone: pick the next card from a closed sheet.
-      await page.keyboard.press('Escape');
-      await atBoard(page, '#/~hub/work/lanes');
-      await page.locator('[data-lane-chip="running"]').click();
-      await clickCard(page, 'bead:ws-doing');
-    } else {
-      await clickCard(page, 'bead:ws-doing');
-    }
+    // The window is modal and the scrim covers the board: the next card is picked from a closed window.
+    await page.keyboard.press('Escape');
+    await atBoard(page, '#/~hub/work/lanes');
+    if (phone) await page.locator('[data-lane-chip="running"]').click();
+    await clickCard(page, 'bead:ws-doing');
     await titled(page, 'In progress').waitFor();
     assert.equal(await hashOf(page), '#/~hub/work/lanes/ws-doing');
     await page.keyboard.press('Escape');
@@ -141,13 +134,13 @@ try {
     assert.equal(await panelOf(page).count(), 0);
     assert.equal(await page.locator('[data-board-note]').count(), 0);
 
-    step(`${label}: Show on roadmap goes to the Roadmap node`);
+    step(`${label}: Show on roadmap goes to the Roadmap row, marked, with no window`);
     await page.goto(`${fixture.url}#/~hub/work/lanes/ws-ready`);
     await titled(page, 'Ready to start').waitFor();
     await page.locator('[data-show-on-roadmap]').click();
-    await page.waitForFunction(() => location.hash === '#/~hub/map/lanes/ws-ready');
-    // A phone has no Map: the same address is the list with the row marked and no sheet over it.
-    if (phone) { await page.locator('[data-roadmap-at]').waitFor(); assert.equal(await panelOf(page).count(), 0); } else await panelOf(page).waitFor();
+    await page.waitForFunction(() => location.hash === '#/~hub/project/lanes/at/ws-ready');
+    await page.locator('[data-roadmap-at]').waitFor();
+    assert.equal(await panelOf(page).count(), 0, 'The row is marked and no window covers it.');
 
     step(`${label}: an item the board lacks but the map has opens its sheet, and a task inside it opens in Work`);
     await page.goto(`${fixture.url}#/~hub/work/lanes/ws-grp`);
@@ -184,7 +177,7 @@ try {
     await clickCard(page, 'bead:sd-one');
     await titled(page, 'Side quest').waitFor();
     assert.equal(await hashOf(page), '#/~hub/work/all/sd-one');
-    assert.equal(await page.locator('[data-show-on-roadmap]').getAttribute('href'), '#/~hub/map/side/sd-one');
+    assert.equal(await page.locator('[data-show-on-roadmap]').getAttribute('href'), '#/~hub/project/side/at/sd-one');
     assert.equal(await page.locator('[data-card="bead:sd-one"][data-focused="true"]').count(), 1);
     await page.keyboard.press('Escape');
     await atBoard(page, '#/~hub/work/all');
