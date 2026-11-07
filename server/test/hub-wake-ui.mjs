@@ -68,7 +68,8 @@ try {
   await view.goto(`${drawerFixture.url}#/~hub/needs`);
   const card = view.locator(`[data-need="approval-${PC_REQUEST}"]`);
   await card.waitFor();
-  assert.match(await card.locator('[data-approval-starts]').innerText(), /within a few minutes/);
+  // The PC's last report is 40 minutes old, so the Hub does not promise a start (ws-3o5).
+  assert.match(await card.locator('[data-approval-starts]').innerText(), /asleep or off/);
   assert.doesNotMatch(await card.innerText(), /dispatcher|5 minutes/);
   await card.locator('[data-approval-approve]').click();
   await view.locator('[data-next-note]').waitFor();
@@ -76,7 +77,7 @@ try {
   await view.locator(`[data-request-open="${PC_REQUEST}"]`).click();
   const drawer = view.locator('[data-run-view]');
   await drawer.waitFor();
-  assert.match(await drawer.locator('[data-run-pc-start]').innerText(), /Starts on the PC within a few minutes/);
+  assert.match(await drawer.locator('[data-run-pc-start]').innerText(), /probably asleep or off/);
   await drawer.locator('[data-wake-button]').waitFor();
   assert.equal(await drawer.locator('[data-wake-button]').innerText(), 'Wake the PC');
   await drawer.locator('[data-wake-button]').click();
