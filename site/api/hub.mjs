@@ -1994,6 +1994,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     close: async () => { chat.close(); policy.close(); sprints.close(); await routines.close(); await hermesDispatch.close(); },
     /** What this host tells the page about the Hub (merged into /api/capabilities). */
     capabilities({ signedIn = true, requireRemoteUser = false } = {}) {
+      // A visitor who is not signed in, on a site that requires sign-in, is shown the Library alone: no Hub, as on a host without one.
+      if (on && requireRemoteUser && !signedIn) return { hub: false, chat: false };
       // approve: this host can sign an approval and the caller is signed in; policy lists the kinds approved without a tap (none yet).
       return {
         hub: on, ...chat.capabilities({ enabled: on, signedIn, requireRemoteUser }),
@@ -2035,6 +2037,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       try {
         if (!on) throw fail('The Hub is off on this host.', 404);
         if (isChatRoute(route)) { await chat.handle({ request, response, method, route, query, user, requireRemoteUser }); return true; }
+        // Default-deny: where sign-in is required, every Hub read needs a user, so a route added later is closed without a list to keep.
+        if (method === 'GET' && requireRemoteUser && !user) throw fail('Sign in to read this.', 401);
         const at = now();
         const limit = bodyLimit(method, route);
         let match;

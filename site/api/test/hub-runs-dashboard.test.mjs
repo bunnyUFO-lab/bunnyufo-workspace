@@ -28,7 +28,7 @@ async function fixture({ now } = {}) {
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const get = async route => { const answer = await fetch(`${origin}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
+  const get = async route => { const answer = await fetch(`${origin}/api${route}`, { headers: { 'Remote-User': 'owner' } }); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   const put = seeder(fake, 'sections/inbox-dev');
   /** A request with its approval, and the files of the stage it is in. */
   const run = (id, { runner = 'hermes', preset = 'research', title = id, minutes = 10, taken = true, result, session, project = 'probe' } = {}) => {

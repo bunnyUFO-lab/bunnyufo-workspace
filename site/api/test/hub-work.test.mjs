@@ -238,7 +238,7 @@ test('GET /hub/work reads every project with a Beads copy, or one', async () => 
   const hub = createHub({ bucket, enabled: true });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
   await listenOnGoodPort(server, '127.0.0.1');
-  const get = async route => { const answer = await fetch(`http://127.0.0.1:${server.address().port}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
+  const get = async route => { const answer = await fetch(`http://127.0.0.1:${server.address().port}/api${route}`, { headers: { 'Remote-User': 'owner' } }); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   try {
     const seed = seeder(fake);
     seed.put('beads/magic-loops.jsonl', jsonl([beadsIssue({ id: 'ml-abcd', status: 'in_progress' })]), 'application/x-ndjson');
@@ -300,7 +300,7 @@ test('GET /hub/search-text gives one row per issue for a project or every projec
   const hub = createHub({ bucket, enabled: true });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
   await listenOnGoodPort(server, '127.0.0.1');
-  const get = async route => { const answer = await fetch(`http://127.0.0.1:${server.address().port}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
+  const get = async route => { const answer = await fetch(`http://127.0.0.1:${server.address().port}/api${route}`, { headers: { 'Remote-User': 'owner' } }); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   try {
     const seed = seeder(fake);
     seed.put('beads/magic-loops.jsonl', jsonl([beadsIssue({ id: 'ml-abcd', description: 'Rare quokka word.' })]), 'application/x-ndjson');
@@ -483,7 +483,7 @@ test('GET /hub/work?sprint= narrows the board and refuses a bad name', async () 
   const hub = createHub({ bucket, enabled: true });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
   await listenOnGoodPort(server, '127.0.0.1');
-  const get = async route => { const answer = await fetch(`http://127.0.0.1:${server.address().port}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
+  const get = async route => { const answer = await fetch(`http://127.0.0.1:${server.address().port}/api${route}`, { headers: { 'Remote-User': 'owner' } }); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   try {
     const seed = seeder(fake);
     seed.put('beads/spr.jsonl', jsonl([

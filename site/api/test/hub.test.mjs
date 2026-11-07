@@ -34,7 +34,7 @@ async function fixture({ hub = true, requireRemoteUser = true, hubOptions = {}, 
     method, headers: { ...(method === 'GET' ? {} : { Origin: SITE }), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
     body: data === undefined ? undefined : typeof data === 'string' ? data : JSON.stringify(data),
   });
-  const get = async route => { const answer = await call('GET', route); return { status: answer.status, body: await answer.json().catch(() => null) }; };
+  const get = async (route, headers = { 'Remote-User': 'owner' }) => { const answer = await call('GET', route, undefined, headers); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   const post = async (route, data, headers = { 'Remote-User': 'owner' }) => { const answer = await call('POST', route, data ?? {}, headers); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   const close = async () => { server.close(); await fake.close(); };
   return { fake, seed: seeder(fake), get, post, call, origin, close };
@@ -445,7 +445,7 @@ test("a blocked item clears on its own session's next event, not another's", asy
     const server = createSiteApi({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), templateDir: path.join(tmpdir(), 'none'), stateFile: path.join(tmpdir(), `buw-state-${Date.now()}.json`), sectionsTtl: 0, requireRemoteUser: true, hub: createHub({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), enabled: true }) });
     await listenOnGoodPort(server, '127.0.0.1');
     try {
-      const fresh = async route => ({ body: await (await fetch(`http://127.0.0.1:${server.address().port}/api${route}`)).json() });
+      const fresh = async route => ({ body: await (await fetch(`http://127.0.0.1:${server.address().port}/api${route}`, { headers: { 'Remote-User': 'owner' } })).json() });
       assert.deepEqual((await blocked(fresh)).map(item => item.session), ['sess-c']);
     } finally { server.close(); }
   } finally { await close(); }
@@ -632,7 +632,7 @@ test('a review leaves Needs you once it is marked done, and stays gone', async (
     const server = createSiteApi({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), templateDir: path.join(tmpdir(), 'none'), stateFile: path.join(tmpdir(), `buw-state-${Date.now()}.json`), sectionsTtl: 0, requireRemoteUser: true, hub: other });
     await listenOnGoodPort(server, '127.0.0.1');
     try {
-      const fresh = await (await fetch(`http://127.0.0.1:${server.address().port}/api/hub/inbox?filter=reviews`)).json();
+      const fresh = await (await fetch(`http://127.0.0.1:${server.address().port}/api/hub/inbox?filter=reviews`, { headers: { 'Remote-User': 'owner' } })).json();
       assert.deepEqual(fresh.items.map(item => item.id).sort(), [bare, withUrl].sort());
     } finally { server.close(); }
 
@@ -681,21 +681,50 @@ test('no Hub write lands outside sections/inbox/, and inboxKey refuses what it s
   } finally { await close(); }
 });
 
-test('access: reads are open, writes need a signed-in user, capabilities say hub: true and chat: false', async () => {
+test('access: with sign-in required, reads and writes need a signed-in user, and a guest is told there is no Hub', async () => {
   const { seed, get, post, call, close } = await fixture();
   try {
     seed.ask(askJson({ id: id('access'), now: NOW }));
     assert.equal((await post('/hub/requests', { project: 'probe', text: 'x', when: 'nightly' }, {})).status, 401);
     assert.equal((await call('POST', `/hub/asks/${id('access')}/cancel`, {})).status, 401);
     assert.equal((await call('POST', '/hub/reviews/120000-pc-000001.json/done', {})).status, 401);
+    assert.equal((await get('/hub/today', {})).status, 401);
     assert.equal((await get('/hub/today')).status, 200);
     const open = await (await call('GET', '/capabilities')).json();
-    assert.equal(open.hub, true);
-    assert.equal(open.chat, false);
-    assert.equal(open.write, false);
+    assert.deepEqual([open.hub, open.chat, open.write], [false, false, false]);
+    for (const key of ['cloudRepos', 'policy', 'approve']) assert.ok(!(key in open), `a guest's answer holds ${key}`);
     const signed = await (await call('GET', '/capabilities', undefined, { 'Remote-User': 'owner' })).json();
     assert.equal(signed.hub, true);
     assert.equal(signed.write, true);
+    assert.ok('cloudRepos' in signed && 'policy' in signed);
+  } finally { await close(); }
+});
+
+// One route from each row of the Hub's reads. With sign-in required and no user, each is 401 and no inbox key is read.
+const GUEST_READS = [
+  '/hub/events', '/hub/jobs', '/hub/requests/120000-example-000001', '/hub/requests/120000-example-000001/events', '/hub/presets/brief',
+  '/hub/today', '/hub/inbox', '/hub/asks/example', '/hub/checklists/example', '/hub/reviews/example', '/hub/hermes-approvals/example',
+  '/hub/file?path=asks/example/a.png', '/hub/drawings', '/hub/drawings/example', '/hub/beads/probe', '/hub/search-text?q=example',
+  '/hub/work', '/hub/map/probe', '/hub/project-summary', '/hub/projects', '/hub/project-cards', '/hub/unasked', '/hub/team', '/hub/team/example/sheets',
+  '/hub/card-writes', '/hub/card-write-sections', '/hub/presence', '/hub/pc/start?project=probe', '/hub/pc', '/hub/schedules', '/hub/chat',
+];
+
+test('access: with sign-in required, a guest reads nothing from the Hub and no inbox key is read; a signed-in user is not refused', async () => {
+  const { fake, seed, call, close } = await fixture();
+  try {
+    seed.ask(askJson({ id: id('access'), now: NOW }));
+    const reads = () => fake.log.filter(entry => /^sections\/inbox\//.test(entry.key ?? '')).length;
+    const before = reads();
+    for (const route of GUEST_READS) assert.equal((await call('GET', route)).status, 401, `${route} for a guest`);
+    assert.equal(reads(), before, 'a refused read touches no inbox key');
+    for (const route of GUEST_READS) assert.notEqual((await call('GET', route, undefined, { 'Remote-User': 'owner' })).status, 401, `${route} signed in`);
+  } finally { await close(); }
+});
+
+test('access: with sign-in required, the Library stays open to a guest (with the rule off, the existing team-details case shows reads unchanged)', async () => {
+  const { call, close } = await fixture();
+  try {
+    for (const route of ['/sites.json', '/capabilities', '/card-state']) assert.equal((await call('GET', route)).status, 200, route);
   } finally { await close(); }
 });
 
@@ -736,11 +765,11 @@ test('GET /hub/file serves only asks, requests and drawings, with their content 
     const ask = askJson({ id: id('file'), now: NOW, options: threeOptions() });
     seed.ask(ask);
     seed.put('chat/x.jsonl', '{"role":"user"}\n');
-    assert.equal((await call('GET', '/hub/file?path=chat/x.jsonl')).status, 400);
-    assert.equal((await call('GET', '/hub/file?path=events/2026-10-26/a.json')).status, 400);
-    assert.equal((await call('GET', '/hub/file?path=asks/../chat/x.jsonl')).status, 400);
-    assert.equal((await call('GET', `/hub/file?path=asks/${ask.id}/nothing.png`)).status, 404);
-    const image = await call('GET', `/hub/file?path=asks/${ask.id}/a.png`);
+    assert.equal((await call('GET', '/hub/file?path=chat/x.jsonl', undefined, { 'Remote-User': 'owner' })).status, 400);
+    assert.equal((await call('GET', '/hub/file?path=events/2026-10-26/a.json', undefined, { 'Remote-User': 'owner' })).status, 400);
+    assert.equal((await call('GET', '/hub/file?path=asks/../chat/x.jsonl', undefined, { 'Remote-User': 'owner' })).status, 400);
+    assert.equal((await call('GET', `/hub/file?path=asks/${ask.id}/nothing.png`, undefined, { 'Remote-User': 'owner' })).status, 404);
+    const image = await call('GET', `/hub/file?path=asks/${ask.id}/a.png`, undefined, { 'Remote-User': 'owner' });
     assert.equal(image.status, 200);
     assert.equal(image.headers.get('content-type'), 'image/png');
     assert.equal(image.headers.get('cache-control'), 'private, max-age=300');
@@ -1236,15 +1265,15 @@ test('the files route stores a PNG or JPEG for a step, create-only, in the check
     assert.deepEqual((await get(`/hub/checklists/${list.id}`)).body.shots.map(row => row.file), [shot.body.file]);
 
     // Served back with the sandbox header and the right type; other names in the folder are not served.
-    const served = await call('GET', `/hub/file?path=checklists/${list.id}/${second.body.file}`);
+    const served = await call('GET', `/hub/file?path=checklists/${list.id}/${second.body.file}`, undefined, { 'Remote-User': 'owner' });
     assert.equal(served.status, 200);
     assert.equal(served.headers.get('content-type'), 'image/jpeg');
     assert.match(served.headers.get('content-security-policy'), /^sandbox;/);
     assert.equal(served.headers.get('x-content-type-options'), 'nosniff');
-    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/checklist.json`)).status, 400);
-    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/evidence-02-20261027T143000000Z-aaaa.webp`)).status, 400);
-    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/../../asks/x/ask.json`)).status, 400);
-    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/evidence-02-20261027T143000000Z-aaaa.png`)).status, 404);
+    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/checklist.json`, undefined, { 'Remote-User': 'owner' })).status, 400);
+    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/evidence-02-20261027T143000000Z-aaaa.webp`, undefined, { 'Remote-User': 'owner' })).status, 400);
+    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/../../asks/x/ask.json`, undefined, { 'Remote-User': 'owner' })).status, 400);
+    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/evidence-02-20261027T143000000Z-aaaa.png`, undefined, { 'Remote-User': 'owner' })).status, 404);
   } finally { await close(); }
 });
 
