@@ -10,6 +10,7 @@ import { ApprovalBody } from './ApprovalView'
 import ChecklistBody from './ChecklistBody'
 import HermesApprovalView from './HermesApprovalView'
 import RunQuestionView from './RunQuestionView'
+import PcStuckView from './PcStuckView'
 import { ReviewActions } from './ItemRow'
 import { nothingToDo } from './reviewText'
 import { useMarkDone } from './useMarkDone'
@@ -156,6 +157,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
         {item.kind === 'blocked' && <BlockedBody item={item} onSettled={() => onSettled(item, 'done')} />}
         {item.kind === 'hermes-approval' && <HermesApprovalView item={item} onSettled={(verb, extra) => onSettled(item, verb, extra)} />}
         {item.kind === 'run-question' && <RunQuestionView item={item} onSettled={(verb, extra) => onSettled(item, verb, extra)} />}
+        {item.kind === 'pc-stuck' && <PcStuckView item={item} onSettled={(verb, extra) => onSettled(item, verb, extra)} />}
       </article>
     </div>
   )

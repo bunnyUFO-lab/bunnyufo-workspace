@@ -113,7 +113,8 @@ async function fixture({ envFile = true, file } = {}) {
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = async () => (await fetch(`${origin}/api/hub/schedules`, { headers: { 'Remote-User': 'owner' } })).json();
-  return { fake, get, close: async () => { server.close(); await fake.close(); } };
+  const raw = (route, headers = {}) => fetch(`${origin}/api${route}`, { headers });
+  return { fake, get, raw, close: async () => { server.close(); await fake.close(); } };
 }
 
 test('GET /hub/schedules reads the PC status and the file beside the env file, and works when either is missing', async () => {
@@ -132,6 +133,24 @@ test('GET /hub/schedules reads the PC status and the file beside the env file, a
       assert.deepEqual(body.sources.slice(2).map(source => [source.id, source.state, source.text]), [['site-timers', 'not-reporting', NOT_REPORTING], ['pc-tasks', 'not-reporting', NOT_REPORTING], ['github', 'not-reporting', NOT_REPORTING]], JSON.stringify(options));
     } finally { await lone.close(); }
   }
+});
+
+test('a guest reads no task, folder, repo or workflow name: /hub/pc drops the field, /hub/schedules needs sign-in', async () => {
+  const f = await fixture({ file: hostText() });
+  try {
+    seedPcStatus(f.fake, pcStatusJson({ now: NOW, minutesOld: 1, extra: { schedules: pcSchedules({ now: NOW }) } }));
+    const guest = await f.raw('/hub/pc');
+    assert.equal(guest.status, 200);
+    const text = await guest.text();
+    const body = JSON.parse(text);
+    assert.equal(body.pc.state, 'on');
+    assert.ok(body.status && body.status.host && Array.isArray(body.status.sessions), 'the rest of the status is still sent');
+    assert.ok(!('schedules' in body.status));
+    for (const word of ['Sample Report', 'Example Updater', 'example-org', 'ci.yml', 'tasksAt', 'ours']) assert.ok(!text.includes(word), );
+    assert.equal((await f.raw('/hub/schedules')).status, 401);
+    const signed = await (await f.raw('/hub/schedules', { 'Remote-User': 'owner' })).json();
+    assert.deepEqual(signed.sources.map(source => [source.id, source.state, source.items.length]), [['hermes-jobs', 'not-reporting', 0], ['hermes-timers', 'not-reporting', 0], ['site-timers', 'live', 3], ['pc-tasks', 'live', 4], ['github', 'live', 2]]);
+  } finally { await f.close(); }
 });
 
 test('the files of this part name nothing of the owner\'s machines', () => {
