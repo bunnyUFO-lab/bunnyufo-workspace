@@ -102,7 +102,7 @@ test('verdict: a cap with no known end, a daily cap or a pause of many hours is 
 test('verdict: a login that expired has its own title, text and the two commands', () => {
   const v = verdict(undefined, { runner: { ...RUNNER, pausedUntil: new Date(START + 7 * 24 * 60 * MIN).toISOString(), pausedReason: 'login-expired' }, waited: 11 * MIN });
   assert.deepEqual([v.cause, v.stuck, v.title, v.command], ['login-expired', true, 'The PC needs you to sign in again', LOGIN_COMMAND]);
-  assert.equal(LOGIN_COMMAND, 'claude auth login\nnode dispatch.mjs resume');
+  assert.equal(LOGIN_COMMAND, 'claude auth login\nnode $HOME\\.config\\pc-dispatch\\dispatch.mjs resume');
   assert.ok(!/week|7 days|wait/i.test(v.text), 'It never tells the owner to wait a week.');
 });
 

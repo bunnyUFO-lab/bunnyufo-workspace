@@ -22,7 +22,7 @@ export const CAUSES = ['not-on-runner', 'launch-off', 'pc-silent', 'login-expire
 /** The commands the items show in a copyable block. */
 export const ADD_REPO_COMMAND = 'install.ps1 -AddRepo <path> -Yes';
 export const LAUNCH_ON_COMMAND = 'install.ps1 -Runs -Launch on';
-export const LOGIN_COMMAND = 'claude auth login\nnode dispatch.mjs resume';
+export const LOGIN_COMMAND = 'claude auth login\nnode $HOME\\.config\\pc-dispatch\\dispatch.mjs resume';
 
 /** "about 20 minutes", "about 2 hours", "about 3 days", "less than a minute". */
 export function span(ms) {
