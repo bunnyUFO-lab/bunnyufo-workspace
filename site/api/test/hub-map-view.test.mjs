@@ -7,7 +7,7 @@ import { clampView, fitScale, fitView, keepPoint, limitsFor, viewAt, zoomAround 
 import { LABEL_MAX, layoutMap } from '../../../src/hub/mapLayout.ts';
 import { FOLD_F, FOLD_M, OPEN_F, OPEN_M, slotAt, stableOf, zoomStep } from '../../../src/hub/semanticZoom.ts';
 import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.mjs';
-import { PROJECT_TABS, TASK_PAGE, currentMilestone, listed, orderedTasks, roadmapList, tabCounts, tabOf } from '../../../src/hub/projectPage.ts';
+import { PROJECT_TABS, TASK_PAGE, currentMilestone, listed, orderedTasks, tabCounts, tabOf } from '../../../src/hub/projectPage.ts';
 import { parseProjectId, projectHash, projectNodeHash } from '../../../src/lib/route.ts';
 import { buildMap } from '../hub-map.mjs';
 import { sprintModel, sprintsOf } from '../../../src/hub/sprintScope.ts';
@@ -498,17 +498,6 @@ test('orderedTasks: open tasks first (doing, you, next, later), done last, each 
   assert.deepEqual(orderedTasks(pMilestone('m', tasks)).map(task => task.id), ['t4', 't6', 't3', 't7', 't5', 't1', 't2', 't8']);
   assert.deepEqual(orderedTasks(pMilestone('m', [])), []);
   assert.equal(TASK_PAGE, 20, 'A milestone opens with twenty tasks.');
-});
-
-test('roadmapList: the finished milestones fold apart, and the current one is the one with work in hand', () => {
-  const done = pMilestone('m1', [pTask('a', 'done')]);
-  const open = pMilestone('m2', [pTask('b', 'done'), pTask('c', 'next')]);
-  const later = pMilestone('m3', [pTask('d', 'later', 'deferred')]);
-  const list = roadmapList({ milestones: [done, open, later] });
-  assert.deepEqual([list.current, list.open.map(m => m.id), list.done.map(m => m.id)], ['m2', ['m2', 'm3'], ['m1']]);
-  const quiet = roadmapList({ milestones: [done, later] });
-  assert.equal(quiet.current, 'm3', 'With no work in hand the first milestone that is not done leads.');
-  assert.deepEqual(roadmapList({ milestones: [done] }), { current: undefined, open: [], done: [done] });
 });
 
 test('listed: projects with a Beads copy, or all of them while none has one', () => {

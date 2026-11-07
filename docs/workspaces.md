@@ -215,8 +215,8 @@ it. Caddy (`site/caddy/Caddyfile`) forwards `/sites.json`, `/w/<id>/<file>` and 
   `sections/` are reachable this way; `state.json` and anything else in the bucket are not. Nor are the
   inbox (`inbox`, `inbox-dev`), hidden sections or a section's `card-responses/`: they answer 404, and the signed-in
   app reads them through the Hub.
-- `/api/card-state`, `/api/workspace/status`, `/api/workspace/pin`, `/api/workspace/pins` and
-  `/api/workspace/tags` read and write `state.json`. `/api/sections` starts a section: the
+- `/api/card-state`, `/api/workspace/status`, `/api/workspace/pin`, `/api/workspace/pins`,
+  `/api/workspace/tags` and `/api/workspace/purpose` read and write `state.json`. `/api/sections` starts a section: the
   `workspace/` template plus an empty card list carrying the name, put into the bucket.
 - `/api/sections/rename` changes a workspace's display name and `/api/sections/archive` hides or
   restores it (`archived: true` in its `workspace.json`; refused while a card is active as the
@@ -236,6 +236,16 @@ A card's **content** is what `npm run publish` uploads. Pinned, archived, tags a
 the pinned list are not content: they say which cards you want in front of you and they change
 often. They live in `state.json` in the bucket, one object for every section, and the page lays
 it over the card lists when it reads them, so a pin shows at once and no card file is touched.
+
+**What the Archive holds.** A card goes there by itself only when it is a **report** or **done**, and
+has not changed for 7 days. A card may say what it is for: `purpose` in its `workspace.json` entry is
+`report` or `reference`, and no purpose is normal (the card stays). A pinned card, a starter example
+and a `reference` stay in the list however old, and a card archived by hand is always in the Archive.
+The row menu's **Keep as reference** and **Treat as report** write `purpose` into `state.json`, which
+beats whatever a writer put in the entry, so a publish or an agent's write cannot undo the choice.
+`site/api/card-liveness.mjs` is the one copy of this rule; the app, the local service and the site's API
+all read it.
+
 **The local app reads and writes the same object** when a registered workspace names a bucket
 and the machine has credentials for it, so a pin made on a phone is the pin the app shows;
 without a bucket it falls back to `.buw/card-state.json`. `site/api/card-state.mjs` is the one

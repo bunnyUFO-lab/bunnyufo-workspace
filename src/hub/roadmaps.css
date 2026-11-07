@@ -48,14 +48,6 @@ a.rm-crumb:focus-visible { outline: none; box-shadow: var(--focus-ring); border-
   .rm-dots { flex-basis: 100%; justify-content: flex-start; }
 }
 
-/* On a phone the bar takes the project chips' slot (its first crumb leads to the Project page, which has the picker), so the map box keeps its height. */
-@media (max-width: 640px), (max-height: 500px) {
-}
-/* The bar is 44 px against about 30 px for the chips: a sheet in a project with roadmaps leaves the map the same room above it. */
-@media (max-width: 640px) {
-  .hub-mapview:has(.hub-map-branchbar) .hub-map-panel { max-height: min(75dvh, calc(100dvh - 520px)); }
-}
-
 /* Hide completed, and the milestones listed by name under a row that is not done (ws-cl0.13.5). */
 .rm-options { display: flex; margin: 0 0 8px; }
 .rm-options .hub-chip { min-height: 32px; }

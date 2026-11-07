@@ -17,6 +17,8 @@ const named = (card: WorkspaceCard) => ({ id: card.id, workspace: card.workspace
 
 export const setArchived = (card: WorkspaceCard, archived: boolean) => write('/workspace/status', { ...named(card), status: archived ? 'archived' : 'active' })
 export const setPinned = (card: WorkspaceCard, pinned: boolean) => write('/workspace/pin', { ...named(card), pinned })
+/** What the owner says the card is for. It is card state, so it beats whatever a writer put in the entry; the other choice undoes it. */
+export const setPurpose = (card: WorkspaceCard, purpose: 'report' | 'reference') => write('/workspace/purpose', { ...named(card), purpose })
 /** The card's icon: card state like a pin, so no card file changes. '' goes back to the card's own. */
 export const setIcon = (card: WorkspaceCard, emoji: string) => write('/workspace/icon', { ...named(card), emoji })
 

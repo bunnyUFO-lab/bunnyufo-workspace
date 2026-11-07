@@ -110,21 +110,36 @@ try {
     await backOnList(page, 'swapped sheet');
     await leaveThePage(page);
 
-    step(`${label}: Show on map goes to the map, Back returns to the sheet, X returns to the list; the Map switch goes to the map`);
+    step(`${label}: Show on roadmap replaces the window by the marked row, Back returns to the list, ${phone ? 'a phone has no Show on map' : 'Show on map goes to the Map and Back returns to the list'}`);
     await toList(page, fixture.url);
     await press(page.locator('[data-pp-details]').first());
     await panelOf(page).locator('h3').waitFor();
     const show = panelOf(page).locator('[data-show-on-roadmap]');
-    assert.equal(await show.getAttribute('href'), `#/~hub/map/lanes/${milestone}`);
+    assert.equal(await show.getAttribute('href'), `#/~hub/project/lanes/at/${milestone}`);
     await press(show);
-    await page.waitForFunction(value => location.hash === value, `#/~hub/map/lanes/${milestone}`);
+    await page.waitForFunction(value => location.hash === value, `#/~hub/project/lanes/at/${milestone}`);
+    await page.locator('[data-roadmap-at]').waitFor();
+    await panelOf(page).waitFor({ state: 'detached' });
     await page.goBack();
+    await backOnList(page, 'after Show on roadmap');
+    await press(page.locator('[data-pp-details]').first());
     await panelOf(page).locator('h3').waitFor();
-    assert.equal(await hashOf(page), sheetUrl(milestone));
-    await press(page.getByRole('button', { name: 'Close details' }));
-    await backOnList(page, 'after the map');
-    await press(page.locator('[data-roadmap-view="map"]'));
-    await page.waitForFunction(() => location.hash === '#/~hub/map/lanes');
+    if (phone) {
+      assert.equal(await panelOf(page).locator('[data-show-on-map]').count(), 0, 'A phone has no Map to show it on.');
+      await press(page.getByRole('button', { name: 'Close details' }));
+      await backOnList(page, 'phone, closed');
+    }    else {
+      await press(panelOf(page).locator('[data-show-on-map]'));
+      await page.waitForFunction(value => location.hash === value, `#/~hub/map/lanes/${milestone}`);
+      await page.goBack();
+      await backOnList(page, 'after Show on map');
+    }
+    await leaveThePage(page);
+    if (!phone) {
+      await toList(page, fixture.url);
+      await press(page.locator('[data-roadmap-view="map"]'));
+      await page.waitForFunction(() => location.hash === '#/~hub/map/lanes');
+    }
 
     step(`${label}: an unknown node shows the list, no sheet and no error`);
     await page.goto(`${fixture.url}#/~hub/today`);
@@ -134,7 +149,7 @@ try {
     assert.equal(await panelOf(page).count(), 0);
     assert.equal(await hashOf(page), '#/~hub/project/lanes/roadmap/nope');
 
-    step(`${label}: the sheet ${phone ? 'is a bottom sheet, at most 76% tall, with no sideways scroll' : 'is a side panel with the list beside it'}`);
+    step(`${label}: the sheet ${phone ? 'is a bottom sheet, at most 76% tall, with no sideways scroll' : 'is a 680 px window centred over the dimmed list'}`);
     await toList(page, fixture.url);
     await press(page.locator('[data-pp-details]').first());
     await panelOf(page).locator('h3').waitFor();
@@ -144,8 +159,8 @@ try {
       assert.ok(Math.abs(box.y + box.height - viewport.height) <= 1 && Math.abs(box.width - viewport.width) <= 1, `Across the bottom (${JSON.stringify(box)}).`);
       assert.ok(box.height <= viewport.height * 0.76, `At most 76% tall (${box.height}).`);
     } else {
-      const listBox = await page.locator(list).boundingBox();
-      assert.ok(listBox.x + listBox.width <= box.x + 1, `The list (${listBox.x + listBox.width}) ends before the panel (${box.x}).`);
+      assert.ok(Math.abs(box.width - 680) <= 1, `680 wide (${box.width}).`);
+      assert.ok(Math.abs(box.x + box.width / 2 - viewport.width / 2) <= 1 && Math.abs(box.y + box.height / 2 - viewport.height / 2) <= 1, `Centred (${JSON.stringify(box)}).`);
     }
     await page.close();
   }
@@ -206,18 +221,17 @@ try {
         assert.deepEqual(await state(), before, 'Same address, lane, count and picker.');
       }
     }
-    step(`${label}: Work card, Show on roadmap, Back, X: back on the Ready lane`);
+    step(`${label}: Work card, Show on roadmap, Back: back on the board's Ready lane, no window`);
     await page.goto(`${fixture.url}#/~hub/work/lanes`);
     await page.locator('.wk-lane').first().waitFor({ state: 'attached' });
     if (phone) await page.locator('[data-lane-chip="ready"]').tap();
     await press(page.locator('[data-card="bead:ws-ready"]'));
     await panelOf(page).locator('h3').waitFor();
     await press(panelOf(page).locator('[data-show-on-roadmap]'));
-    await page.waitForFunction(() => location.hash === '#/~hub/map/lanes/ws-ready');
+    await page.waitForFunction(() => location.hash === '#/~hub/project/lanes/at/ws-ready');
     await page.goBack();
-    await panelOf(page).locator('h3').waitFor();
-    await press(page.getByRole('button', { name: 'Close details' }));
     await page.waitForFunction(() => location.hash === '#/~hub/work/lanes');
+    assert.equal(await panelOf(page).count(), 0, 'Back returns to the board, not to the window.');
     await page.locator('[data-card="bead:ws-ready"]').waitFor();
     if (phone) assert.deepEqual((await state()).lanes, ['ready']);
     await page.close();
