@@ -419,6 +419,8 @@ export function createSiteApi({
         return cardWriter(bucketStore(bucket, keyOf(found, '').replace(/\/$/, '')), { section: found });
       };
       if (request.method === 'GET' && (route === '/cards/markdown' || route === '/cards/drawing' || route === '/cards/responses' || route === '/cards/move/progress')) {
+        // Reads follow the rule writes follow: where sign-in is required, a card's saved text and answers need a signed-in user.
+        if (requireRemoteUser && !signedIn) return json(response, 401, { error: 'Sign in to read this.' });
         if (!bucket) throw Object.assign(new Error(reason), { status: 503 });
         const answer = await cardRoute({ method: 'GET', route, query: url.searchParams, data: {}, writerFor, moves });
         return json(response, answer.status, answer.body);

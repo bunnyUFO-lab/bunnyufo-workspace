@@ -21,12 +21,14 @@ async function fixture({ secured = false, dev } = {}) {
   const server = createSiteApi({ bucket, stateFile: path.join(root, 'state.json'), sectionsTtl: 0, dev, ...(secured ? { requireRemoteUser: true, allowedOrigins: [APP] } : {}) });
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const get = (workspace, id, doc) => fetch(`${origin}/api/cards/responses?workspace=${workspace}&id=${id}&doc=${doc}`);
+  const read = (route, headers) => fetch(`${origin}/api${route}`, { headers });
+  const asUser = secured ? { 'Remote-User': 'me' } : {};
+  const get = (workspace, id, doc) => read(`/cards/responses?workspace=${workspace}&id=${id}&doc=${doc}`, asUser);
   const post = (data, headers = {}) => fetch(`${origin}/api/cards/responses`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...(secured ? { Origin: APP, 'Remote-User': 'me' } : {}), ...headers }, body: JSON.stringify(data),
   });
   const entry = data => ({ updated: '2026-10-28T10:00:00.000Z', data });
-  return { fake, get, post, entry, close: async () => { server.close(); await fake.close(); } };
+  return { fake, get, read, origin, post, entry, close: async () => { server.close(); await fake.close(); } };
 }
 const KEY = 'sections/one/card-responses/alpha/ratings.json';
 
@@ -95,6 +97,35 @@ test('what it refuses', async () => {
     assert.equal(await status({ set: { r1: { data: 1, updated: 'x'.repeat(41) } } }), 400, 'updated too long');
     assert.equal((await get('one', 'alpha', 'Bad')).status, 400);
   } finally { await close(); }
+});
+
+test('with sign-in required, the four card reads are 401 for a guest and touch no stored key; a signed-in user reads them', async () => {
+  const { fake, get, read, post, entry, close } = await fixture({ secured: true });
+  try {
+    assert.equal((await post({ workspace: 'one', id: 'alpha', doc: 'ratings', set: { r1: entry('fake answer') } })).status, 200);
+    const routes = [
+      '/cards/responses?workspace=one&id=alpha&doc=ratings',
+      '/cards/markdown?workspace=one&id=alpha&path=page.md',
+      '/cards/drawing?workspace=one&id=alpha&path=sketch.excalidraw',
+      '/cards/move/progress?workspace=one&id=alpha',
+    ];
+    const before = fake.log.length;
+    for (const route of routes) {
+      const refused = await read(route, {});
+      assert.equal(refused.status, 401, route);
+      assert.deepEqual(await refused.json(), { error: 'Sign in to read this.' });
+    }
+    assert.deepEqual(fake.log.slice(before), [], 'a refused read touches no stored key');
+    const answer = await get('one', 'alpha', 'ratings');
+    assert.equal(answer.status, 200);
+    assert.equal((await answer.json()).doc.items.r1.data, 'fake answer');
+    assert.notEqual((await read(routes[3], { 'Remote-User': 'me' })).status, 401);
+  } finally { await close(); }
+});
+
+test('without the rule, a card read needs no user', async () => {
+  const { get, close } = await fixture();
+  try { assert.equal((await get('one', 'alpha', 'ratings')).status, 200); } finally { await close(); }
 });
 
 test('a doc over 4 MB is refused with 413 and nothing is written', async () => {
