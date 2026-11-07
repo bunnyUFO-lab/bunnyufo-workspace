@@ -210,7 +210,7 @@ A long list.
       const long = minutesAgo(now, 60 * 24 * 60).toISOString();
       issues.push(
         sprint('sp-epic', 'Sprint 5: Hermes planning from the phone', { type: 'epic', labels: ['roadmap', 'sprint:sprint-5'], created: '2026-10-05T09:00:00Z' }),
-        sprint('sp-t1', 'Plan from the phone', { parent: 'sp-epic', labels: ['sprint:sprint-5'], created: '2026-10-05T10:00:00Z' }),
+        sprint('sp-t1', 'Plan from the phone', { parent: 'sp-epic', labels: ['sprint:sprint-5', 'area:feel'], created: '2026-10-05T10:00:00Z' }),
         sprint('sp-t2', 'Write the project card', { parent: 'sp-epic', labels: ['sprint:sprint-5'], status: 'in_progress', created: '2026-10-05T11:00:00Z' }),
         sprint('sp-t3', 'Old finished sprint task', { parent: 'sp-epic', labels: ['sprint:sprint-5'], status: 'closed', closed: minutesAgo(now, 60 * 24 * 30).toISOString(), created: '2026-10-05T12:00:00Z' }),
         sprint('sp-t4', 'New finished sprint task', { parent: 'sp-epic', labels: ['sprint:sprint-5'], status: 'closed', closed: iso(minutesAgo(now, 20)), created: '2026-10-05T13:00:00Z' }),

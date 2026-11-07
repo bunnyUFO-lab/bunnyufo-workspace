@@ -105,7 +105,7 @@ try {
 
   step('All shows every project, with the project on each card');
   await page.locator('.hub-chip', { hasText: /^All$/ }).click();
-  await page.waitForFunction(() => location.hash === '#/~hub/work/all');
+  await page.waitForFunction(() => location.hash === '#/~hub/work?project=all');
   await page.locator('.wk-card .wk-project').first().waitFor();
   assert.ok(await page.locator('.hub-chip.on', { hasText: /^All$/ }).count() === 1);
   assert.ok(await page.locator('.wk-lane[data-lane="running"] .wk-project').count() >= 1);
@@ -310,9 +310,9 @@ try {
   await sp.locator('[data-work-tab="board"]').click();
   await sp.locator('.wk-lane').first().waitFor();
   assert.equal(await hashOf(), '#/~hub/work?project=lanes&sprint=sprint-5');
-  await sp.locator('[data-card="bead:ws-ready"]').click();
+  await sp.locator('[data-card="bead:sp-t1"]').click();
   await sp.locator('#hub-map-panel').waitFor();
-  assert.equal(await hashOf(), '#/~hub/work/lanes/ws-ready?sprint=sprint-5', 'A sheet on the board keeps the sprint.');
+  assert.equal(await hashOf(), '#/~hub/work/lanes/sp-t1?sprint=sprint-5', 'A sheet on the board keeps the sprint.');
   await sp.locator('.hub-map-panel-close').click();
   await sp.waitForFunction(() => !document.querySelector('#hub-map-panel'));
   assert.match(await hashOf(), /sprint=sprint-5/, 'Closing the sheet keeps the sprint.');
@@ -325,6 +325,63 @@ try {
   await sp.locator('[data-roadmap-view="list"]').click();
   await sp.waitForFunction(() => location.hash.startsWith('#/~hub/project/lanes'));
   assert.match(await hashOf(), /sprint=sprint-5/, 'The List keeps the sprint.');
+
+  step('sprint on the board: only its cards, old Done included, the picker keeps focus, a pick adds no history entry, project drops the sprint');
+  await go(sp, '#/~hub/work?project=lanes&sprint=sprint-5');
+  await sp.waitForFunction(() => document.querySelector('[data-work-sprint]'));
+  assert.deepEqual(await idsOf(sp, 'ready'), ['sp-t1']);
+  assert.deepEqual(await idsOf(sp, 'running'), ['sp-t2']);
+  assert.deepEqual(await idsOf(sp, 'done'), ['sp-t3', 'sp-t4'], 'The old Done task shows under a sprint.');
+  assert.equal(await sp.locator('.wk-card[data-card="bead:ws-ready"]').count(), 0);
+  const line = (await sp.locator('[data-work-sprint]').innerText()).replace(/\s+/g, ' ');
+  assert.match(line, /Sprint 5: Hermes planning from the phone/);
+  assert.match(line, /2 of 4 done/);
+  assert.equal(await sp.locator('[data-work-sprint-project]').getAttribute('href'), '#/~hub/project/lanes?sprint=sprint-5');
+  assert.match(await sp.locator('[data-filter-sprint]').inputValue(), /^Sprint 5: Hermes planning from the phone · 2 of 4 done$/);
+  const before = await sp.evaluate(() => history.length);
+  await sp.locator('[data-filter-sprint]').click();
+  const sprintOptions = await sp.locator('.cb-list [role="option"]').evaluateAll(list => list.map(item => [item.getAttribute('data-value'), item.textContent.trim()]));
+  assert.deepEqual(sprintOptions, [['', 'All sprints'], ['sprint-5', 'Sprint 5: Hermes planning from the phone · 2 of 4 done'], ['sprint-4', 'sprint-4 · 1 of 1 done']]);
+  await sp.locator('.cb-list [role="option"][data-value="sprint-4"]').click();
+  await sp.waitForFunction(() => location.hash === '#/~hub/work?project=lanes&sprint=sprint-4');
+  await sp.waitForFunction(() => document.querySelector('.wk-lane[data-lane="done"] .hub-id')?.textContent.trim() === 'sp-o1');
+  assert.equal(await sp.evaluate(() => history.length), before, 'A pick adds no history entry.');
+  assert.equal(await sp.evaluate(() => document.activeElement?.hasAttribute('data-filter-sprint')), true, 'The picker keeps the focus.');
+  assert.equal(await sp.locator('[data-lane-more]').count(), 0);
+  await sp.evaluate(() => { location.hash = '#/~hub/work?project=lanes&sprint=nothing-here'; });
+  await sp.waitForFunction(() => document.querySelector('[data-work-sprint="nothing-here"]'));
+  await sp.waitForFunction(() => !document.querySelector('.wk-lanes-wrap[data-stale]') && !document.querySelector('.wk-lane .wk-card'));
+  assert.equal(await sp.locator('.wk-lane .wk-card').count(), 0, 'An unknown sprint gives empty lanes.');
+  assert.equal(await sp.locator('[data-filter-sprint]').inputValue(), 'nothing-here', 'A sprint the list lacks still shows.');
+  await sp.evaluate(() => { location.hash = '#/~hub/work?project=lanes&sprint=sprint-5'; });
+  await sp.waitForFunction(() => document.querySelector('.wk-lane[data-lane="ready"] .hub-id')?.textContent.trim() === 'sp-t1');
+  assert.equal(await sp.locator('[data-lane] .wk-more').count(), 0, 'Lanes do not fold under a sprint.');
+  await sp.locator('[data-filter-label]').click();
+  const labelValues = await sp.locator('.cb-list [role="option"]').evaluateAll(list => list.map(item => item.getAttribute('data-value')));
+  assert.ok(labelValues.includes('area:feel'), 'Other labels stay.');
+  assert.equal(labelValues.some(value => value.startsWith('sprint:')), false, 'The label list leaves out sprint labels.');
+  await sp.keyboard.press('Escape');
+  await sp.locator('.wk-count .wk-clear').click();
+  await sp.waitForFunction(() => location.hash === '#/~hub/work?project=lanes');
+  assert.equal(await sp.locator('[data-work-sprint]').count(), 0, 'Clear clears the sprint too.');
+  await go(sp, '#/~hub/work?project=lanes&sprint=sprint-5');
+  await sp.waitForFunction(() => document.querySelector('[data-work-sprint]'));
+  await sp.locator('.hub-chips a', { hasText: /lanes/i }).first().click();
+  await sp.waitForFunction(() => !location.hash.includes('sprint='));
+
+  step('sprint on a phone: the picker is in the filters sheet, Filters counts it, Clear all clears it');
+  const spPhone = await open({ width: 390, height: 800 });
+  await spPhone.goto(`${sprinted.url}#/~hub/work?project=lanes&sprint=sprint-5`);
+  await spPhone.locator('[data-work-sprint]').waitFor();
+  assert.match((await spPhone.locator('[data-work-filters]').innerText()).trim(), /^Filters \(1\)$/);
+  await spPhone.locator('[data-work-filters]').click();
+  const phoneInput = spPhone.locator('[data-work-filter-sheet] [data-filter-sprint]');
+  await phoneInput.waitFor();
+  assert.ok((await phoneInput.evaluate(node => node.getBoundingClientRect().height)) >= 44, 'The sprint field is 44 px or more on a phone.');
+  await noSideways(spPhone, 'Work with a sprint at 390 px');
+  await spPhone.locator('[data-work-clear-all]').click();
+  await spPhone.waitForFunction(() => location.hash === '#/~hub/work?project=lanes');
+  await spPhone.locator('[data-work-sprint]').waitFor({ state: 'detached' });
 
   console.log('hub-work-ui: passed');
 } finally {

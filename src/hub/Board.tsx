@@ -10,7 +10,7 @@ import { useIsPhone } from '../lib/chrome'
 import SearchField from './SearchField'
 import { host } from '../lib/host'
 import { find } from './mapState'
-import { hubHash, mapHash, withScope, workHash } from '../lib/route'
+import { hubHash, mapHash, projectHash, withScope, workBoardHash, workHash } from '../lib/route'
 import { swap } from '../lib/entries'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
@@ -18,6 +18,7 @@ import { openSpawn } from './spawnStore'
 import RefreshNote from './RefreshNote'
 import { useHeldHubData, useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
+import SprintPicker, { sprintCount } from './SprintPicker'
 import { ProjectLink } from './ProjectChip'
 import { useProject } from './useProject'
 import './work.css'
@@ -128,13 +129,19 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
   const { list, project: chosen, early, loading: listing, error: listError } = useProject(all ? undefined : wanted)
   const project = all ? undefined : chosen
   const target = all ? undefined : chosen ?? early
-  const work = useHeldHubData<WorkLanes>(all || target ? `/work${target ? `?project=${encodeURIComponent(target)}` : ''}` : null, all || !!project)
+  const board = all ? 'all' : project ?? ''
+  const query = [target ? `project=${encodeURIComponent(target)}` : '', sprint ? `sprint=${encodeURIComponent(sprint)}` : ''].filter(Boolean).join('&')
+  const read = useHeldHubData<WorkLanes>(all || target ? `/work${query ? `?${query}` : ''}` : null, all || !!project)
+  // The answer for another sprint stays on screen until this one lands, so the picker (and its focus) is not unmounted by a pick.
+  const [last, setLast] = useState<WorkLanes | null>(null)
+  if (read.data && read.data !== last) setLast(read.data)
+  const workData = read.data ?? last
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [picked, setPicked] = useState<WorkLane | null>(null)
   // Read in the initializer: the board re-mounts per project and must not fall back to the default.
   const [filter, setFilter] = useState<WorkFilter>(savedFilter)
   const change = (next: Partial<WorkFilter>) => { setFilter(value => ({ ...value, ...next })); setPicked(null) }
-  const clearFilter = () => { setFilter(DEFAULT_WORK_FILTER); setPicked(null) }
+  const clearFilter = () => { setFilter(DEFAULT_WORK_FILTER); setPicked(null); if (sprint) swap(workBoardHash(board)) }
   useEffect(() => { saveFilter(filter) }, [filter])
   const phone = useIsPhone()
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -143,17 +150,21 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
   const [wasPhone, setWasPhone] = useState(phone)
   if (phone !== wasPhone) { setWasPhone(phone); if (!phone) setFiltersOpen(false) }
   const closeFilters = useCallback(() => { setFiltersOpen(false); filtersButton.current?.focus({ preventScroll: true }) }, [])
-  const filterCount = workFilterCount(filter)
+  const filterCount = workFilterCount(filter) + (sprint ? 1 : 0)
   const hasQuery = words(filter.q).length > 0
-  const filtering = !isDefaultWork(filter)
+  const filtering = !isDefaultWork(filter) || !!sprint
   // The text of the beads, read only while there is a query.
   const text = useHubData<{ rows: SearchRow[] }>(hasQuery ? `/search-text${project ? `?project=${encodeURIComponent(project)}` : ''}` : null)
   const rowOf = useMemo(() => new Map((hasQuery ? text.data?.rows ?? [] : []).map(row => [`${row.project}/${row.id}`, row])), [hasQuery, text.data])
+  const sprintRow = sprint ? workData?.sprints?.find(row => row.name === sprint) : undefined
   const nameOf = (id: string) => list.find(item => item.id === id)?.name ?? id
   const [pages, setPages] = useState<Partial<Record<WorkLane, WorkCard[]>>>({})
   const [paging, setPaging] = useState<WorkLane | null>(null)
   const [pageError, setPageError] = useState<string | null>(null)
-  const data = useMemo(() => withPages(work.data, pages), [work.data, pages])
+  // The pages read after "Show more" belong to the sprint they were read for: a new sprint starts over. Adjusted while rendering, not by a remount.
+  const [pagesFor, setPagesFor] = useState(sprint)
+  if (pagesFor !== sprint) { setPagesFor(sprint); setPages({}); setPageError(null) }
+  const data = useMemo(() => withPages(workData, pages), [workData, pages])
   const showMore = async (lane: WorkLane) => {
     if (!data || paging) return
     setPaging(lane)
@@ -175,7 +186,7 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
   const matching = shownLanes ? LANES.reduce((sum, [lane]) => sum + shownLanes[lane].length, 0) : 0
   const labelOptions = useMemo(() => {
     const labels = new Set<string>(filter.label ? [filter.label] : [])
-    if (data) for (const [lane] of LANES) for (const card of data.lanes[lane]) for (const label of card.labels ?? []) labels.add(label)
+    if (data) for (const [lane] of LANES) for (const card of data.lanes[lane]) for (const label of card.labels ?? []) if (!label.startsWith('sprint:') || label === filter.label) labels.add(label)
     return [{ value: '', label: 'Any label' }, ...[...labels].sort().map(label => ({ value: label, label }))]
   }, [data, filter.label])
   // Beads that match the search but have no card here: old Done, past the Backlog cap, a group.
@@ -184,7 +195,6 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
     const onBoard = new Set(LANES.flatMap(([lane]) => data.lanes[lane]).map(card => card.key))
     return (text.data?.rows ?? []).filter(row => !onBoard.has(`bead:${row.id}`) && rowMatches(row, filter.q))
   }, [hasQuery, data, text.data, filter.q])
-  const board = all ? 'all' : project ?? ''
   // The lane that holds the item a link pointed at, once the board has loaded; undefined when the board does not have it.
   const focusLane = focusKey && data ? LANES.find(([lane]) => data.lanes[lane].some(card => card.key === focusKey))?.[0] : undefined
   // The item's details sheet: the Roadmap's panel, over the board. It reads the map of the item's project, only while open.
@@ -245,6 +255,7 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
         <div className="hub-seg" role="group" aria-label="Type">
           {(['task', 'feature', 'question'] as WorkType[]).map(type => <button key={type} type="button" className={filter.type === type ? 'on' : ''} aria-pressed={filter.type === type} data-filter-type={type} onClick={() => change({ type: filter.type === type ? null : type })}>{type}</button>)}
         </div>
+        <SprintPicker id="hub-work-sprint" sprints={data.sprints ?? []} value={sprint ?? ''} onChange={name => swap(workBoardHash(board, name || undefined))} className="cb-bar wk-label wk-sprint" />
         <Combobox className="cb-bar wk-label" id="hub-work-label" value={filter.label} options={labelOptions} onChange={label => change({ label })} openLabel="Show labels" inputAttrs={{ 'aria-label': 'Label', 'data-filter-label': '' }} />
         <div className="hub-seg" role="group" aria-label="Updated">
           {([[7, '7d'], [30, '30d'], [null, 'any']] as const).map(([within, label]) => <button key={label} type="button" className={filter.within === within ? 'on' : ''} aria-pressed={filter.within === within} data-filter-within={label} onClick={() => change({ within })}>{label}</button>)}
@@ -257,12 +268,12 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
     <div className="work" data-sheet={focus && !unknown ? 'open' : undefined}>
       {phone ? (
         <div className="wk-phone-bar" data-work-bar>
-          <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => swap(hubHash('work', id))} href={id => hubHash('work', id)} inRow />
+          <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => swap(workBoardHash(id))} href={id => workBoardHash(id)} inRow />
           <button type="button" ref={filtersButton} className={`hub-btn wk-filters-btn${filterCount ? ' on' : ''}`} data-work-filters disabled={!data} aria-haspopup="dialog" aria-expanded={filtersOpen} aria-label={filterCount ? `Filters, ${filterCount} on` : undefined} onClick={() => setFiltersOpen(true)}>{filterCount ? `Filters (${filterCount})` : 'Filters'}</button>
           {project && host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>New job</button>}
         </div>
       ) : (
-        <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => swap(hubHash('work', id))} href={id => hubHash('work', id)} oneRow />
+        <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => swap(workBoardHash(id))} href={id => workBoardHash(id)} oneRow />
       )}
       {data && (
         <>
@@ -270,16 +281,23 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
           {filtering && (
             <p className="wk-count" role="status" data-work-count>{matching} of {loaded} on the board shown · <button type="button" className="wk-clear" onClick={clearFilter}>Clear</button></p>
           )}
+          {sprint && (
+            <p className="wk-sprint-line" data-work-sprint={sprint}>
+              <b>{sprintRow?.title ?? sprintRow?.name ?? sprint}</b>
+              {sprintRow && <span>{sprintCount(sprintRow)}</span>}
+              {project && <a className="pp-link" href={projectHash(project, undefined, sprint)} data-work-sprint-project>Open in project ›</a>}
+            </p>
+          )}
           {hasQuery && text.error && !text.data && <p className="hub-muted" data-search-note>Searching titles and ids only: the text did not load.</p>}
         </>
       )}
       {project && !phone && <div className="work-spawn">{host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>New job</button>}<ProjectLink id={project} label="Project" sprint={sprint} /></div>}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
-      {!data && !work.error && (listing || work.loading) && !listError && <p className="hub-empty">Loading…</p>}
+      {!data && !read.error && (listing || read.loading) && !listError && <p className="hub-empty">Loading…</p>}
       {!listing && !listError && !project && !all && <p className="hub-empty">No projects yet. A project appears once an agent session pushes a Beads copy or writes to the Hub.</p>}
       {listError && <p className="hub-error" role="alert">{listError}</p>}
-      {!listError && <RefreshNote error={work.error} hasData={!!work.data} at={work.at} />}
+      {!listError && <RefreshNote error={read.error} hasData={!!read.data} at={read.at} />}
       {data && unknown && <p className="hub-muted" role="status" data-board-note>{focus} is not on the board: it may be closed long ago, a group, or in another project.</p>}
       {data && (
         <>
@@ -290,7 +308,7 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
               </button>
             ))}
           </div>
-          <div className="wk-lanes-wrap" data-overflow={laneEdges}>
+          <div className="wk-lanes-wrap" data-overflow={laneEdges} data-stale={read.data ? undefined : ''} aria-busy={read.data ? undefined : true}>
           <div className="wk-lanes" data-active={active} ref={laneGrid}>
             {LANES.map(([lane, label]) => {
               const cards = (shownLanes ?? data.lanes)[lane]
