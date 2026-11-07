@@ -4,6 +4,7 @@
 // The file is written by the PC's report script (`inbox/pc/status-<stamp>.json`, create-only, at
 // most 64 KB). It is an agent's file, so `validStatus` cleans every field and refuses what it
 // cannot trust.
+import { cleanPcSchedules } from './hub-other-schedules.mjs';
 import { STALE_GRACE_MS, blockedAppUrl, blockedSessionUrl, deriveEventItems, staleSince, validProject } from './hub-model.mjs';
 
 export { STALE_GRACE_MS };
@@ -110,6 +111,7 @@ export function validStatus(raw) {
   const gpuUtil = raw.gpu && typeof raw.gpu === 'object' ? num(raw.gpu.util, 0, 100) : null;
   const comfy = raw.comfy && typeof raw.comfy === 'object' ? raw.comfy : null;
   const unity = raw.unity && typeof raw.unity === 'object' ? raw.unity : null;
+  const schedules = cleanPcSchedules(raw.schedules);
   return {
     v: 1,
     host: raw.host,
@@ -131,6 +133,7 @@ export function validStatus(raw) {
       projects: (Array.isArray(unity.projects) ? unity.projects : []).slice(0, 10).map(name => lastSegment(name, 80)).filter(Boolean),
     } : null,
     sessions,
+    ...(schedules ? { schedules } : {}),
     runs: [],
   };
 }

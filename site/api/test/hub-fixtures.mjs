@@ -285,6 +285,42 @@ export function scheduleTimers() {
 }
 
 /**
+ * The `schedules` field of a PC status as part D writes it (made-up names): three tasks of "ours" and others, one failed, one running, one off,
+ * and two GitHub schedules in UTC. `tasksTotal` is larger than the rows, as when the PC cuts its list.
+ */
+export function pcSchedules({ now = new Date(), minutesOld = 5 } = {}) {
+  const at = hours => iso(new Date(now.getTime() + hours * 3600_000));
+  const made = iso(minutesAgo(now, minutesOld));
+  return {
+    tasksAt: made, tasksTotal: 7,
+    tasks: [
+      { name: 'Sample Report', folder: '\\Fixture\\', state: 'ready', schedule: 'Mondays, Fridays at 08:00', nextRun: at(30), lastRun: at(-20), lastResult: 'ok', ours: true },
+      { name: 'Sample Nightly', folder: '\\Fixture\\', state: 'running', schedule: 'Every day at 02:00', nextRun: at(10), lastRun: at(-1), lastResult: 'running', ours: true },
+      { name: 'Example Updater', folder: '\\', state: 'ready', schedule: 'Every day at 11:00', nextRun: at(2), lastRun: at(-22), lastResult: 'error 0x80070002' },
+      { name: 'Example Helper', folder: '\\', state: 'disabled', schedule: 'At log on', lastResult: 'not run yet' },
+    ],
+    githubAt: made,
+    github: [
+      { repo: 'example-org/fixture-app', workflow: 'ci.yml', cron: '17 3 * * *', state: 'active', lastRun: at(-9), lastConclusion: 'success' },
+      { repo: 'example-org/fixture-app', workflow: 'nightly.yml', cron: '23 */6 * * *', state: 'disabled', lastRun: at(-30), lastConclusion: 'failure' },
+    ],
+  };
+}
+
+/** The site host's timer file as part D writes it (made-up names). `minutesOld` sets `exportedAt`. */
+export function hostSchedulesJson({ now = new Date(), minutesOld = 6 } = {}) {
+  const at = hours => iso(new Date(now.getTime() + hours * 3600_000));
+  return {
+    v: 1, exportedAt: iso(minutesAgo(now, minutesOld)), hostLabel: 'Site host',
+    timers: [
+      { name: 'fixture-publish.timer', description: 'Publishes the fixture pages', schedule: 'OnCalendar=*:0/15, OnBootSec=2min', enabled: true, nextRun: at(0.2), lastRun: at(-0.05), lastResult: 'ok' },
+      { name: 'fixture-backup.timer', description: 'Copies the fixture data', schedule: 'OnCalendar=daily', enabled: true, nextRun: at(9), lastRun: at(-15), lastResult: 'exit-code' },
+      { name: 'fixture-idle.timer', description: 'Not switched on', schedule: 'OnCalendar=weekly', enabled: false, nextRun: null, lastRun: null, lastResult: 'not run yet' },
+    ],
+  };
+}
+
+/**
  * A v1 settings export as the Hermes host's exporter writes it (made-up values; the "secret" is a fake key made of repeated letters).
  * `exportedMinutesAgo` sets `exportedAt`; `changedMinutesAgo` sets `changedAt`. `modelOptions` is `{ main, briefs }`, the lists the host would publish (ws-im1.4.2); left out, the export has none, as an older exporter's.
  */

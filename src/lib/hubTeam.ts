@@ -260,13 +260,28 @@ export interface ScheduleJob {
   rev?: string
 }
 
-/** One timer of the Hermes host. The export carries no run times for these. */
-export interface ScheduleTimer { name: string; description: string; schedule: string; enabled: boolean; lastResult: string }
+/** One timer of the Hermes host or of the site host. The Hermes host's export carries no run times; the site host's file does. */
+export interface ScheduleTimer { name: string; description: string; schedule: string; enabled: boolean; lastResult: string; nextRun?: string; lastRun?: string }
+
+/** One Windows task of the PC (a non-OS task; `ours` is set for the ones the repo names). `schedule` and `lastResult` are the PC's own words. */
+export interface PcTask {
+  name: string
+  folder: string
+  state: 'ready' | 'running' | 'disabled' | 'queued' | 'unknown'
+  schedule: string
+  nextRun?: string
+  lastRun?: string
+  lastResult: string
+  ours?: boolean
+}
+
+/** One cron line of a GitHub workflow, read through the PC. Times are UTC. */
+export interface GithubSchedule { repo: string; workflow: string; cron: string; state: 'active' | 'disabled' | 'unknown'; lastRun?: string; lastConclusion?: string }
 
 /** `live` is a fresh export, `old` one past the freshness rule, `not-reporting` a list nobody has sent. */
 export type ScheduleState = 'live' | 'old' | 'not-reporting'
 
-export interface ScheduleSource<T = ScheduleJob | ScheduleTimer> {
+export interface ScheduleSource<T = ScheduleJob | ScheduleTimer | PcTask | GithubSchedule> {
   id: 'hermes-jobs' | 'hermes-timers' | 'site-timers' | 'pc-tasks' | 'github'
   label: string
   state: ScheduleState
@@ -276,6 +291,10 @@ export interface ScheduleSource<T = ScheduleJob | ScheduleTimer> {
   /** The model each profile follows, for a job that pins none. */
   profileModels?: Record<string, string>
   text?: string
+  /** A line that belongs under the heading (GitHub's list comes through the PC). */
+  note?: string
+  /** The PC's tasks: how many non-OS tasks it has in all, which can be more than the rows. */
+  total?: number
   items: T[]
 }
 

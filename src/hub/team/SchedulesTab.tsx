@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from 'react'
 import { hubHash } from '../../lib/route'
-import type { ScheduleJob, ScheduleSource, ScheduleTimer, SchedulesView } from '../../lib/hubTeam'
-import { List, Section, Split } from '../../ui/Layout'
+import type { GithubSchedule, PcTask, ScheduleJob, ScheduleSource, ScheduleTimer, SchedulesView } from '../../lib/hubTeam'
+import { Fold, List, Section, Split } from '../../ui/Layout'
 import { useRoute } from './useRoute'
 import {
-  cadenceWords, clockBoth, GUEST_LINE, jobHash, jobSummary, modelWords, NOT_REPORTED, oldLine, onWords, promptNotes, resultWords, sourceLine, targetWords, troubled, zoneName,
+  cadenceWords, clockBoth, GUEST_LINE, jobHash, jobSummary, modelWords, NOT_REPORTED, oldLine, onWords, othersTitle, plainResult, promptNotes, resultWords, runLines, sourceLine, splitTasks, targetWords, taskStateWords, tasksCut, troubled, workflowCadence, zoneName,
 } from './schedulesModel'
 import './schedules.css'
 
@@ -32,17 +32,68 @@ function JobRow({ job, zone, on, now }: { job: ScheduleJob; zone: string | undef
   )
 }
 
-function TimerRow({ timer }: { timer: ScheduleTimer }) {
+function TimerRow({ timer, now }: { timer: ScheduleTimer; now: number }) {
+  const result = plainResult(timer.lastResult)
   return (
-    <div role="listitem" className="ui-row sc-timer" data-timer={timer.name}>
+    <div role="listitem" className={`ui-row sc-timer${result.failed ? ' sc-bad' : ''}`} data-timer={timer.name}>
       <span className="ui-row-body">
         <b>{timer.name}</b>
         {timer.description && <small>{timer.description}</small>}
         {timer.schedule && <small><code>{timer.schedule}</code></small>}
-        {timer.lastResult && <small>Last result: {timer.lastResult}</small>}
+        {runLines(timer, now, timer.enabled).map(line => <small key={line}>{line}</small>)}
       </span>
       <span className="tk-tags"><span className={`ad-tag${timer.enabled ? ' on' : ''}`}>{timer.enabled ? 'On' : 'Off'}</span></span>
     </div>
+  )
+}
+
+function TaskRow({ task, now }: { task: PcTask; now: number }) {
+  const state = taskStateWords(task.state)
+  const result = plainResult(task.lastResult)
+  return (
+    <div role="listitem" className={`ui-row sc-timer${result.failed ? ' sc-bad' : ''}`} data-task={task.name}>
+      <span className="ui-row-body">
+        <b>{task.name}</b>
+        {task.folder.replace(/^[\\/]+$/, '') && <small>{task.folder}</small>}
+        {task.schedule && <small>{task.schedule}</small>}
+        {runLines(task, now, task.state !== 'disabled').map(line => <small key={line}>{line}</small>)}
+      </span>
+      <span className="tk-tags"><span className={`ad-tag${state.on ? ' on' : ''}`} data-task-state={task.state}>{state.label}</span></span>
+    </div>
+  )
+}
+
+function WorkflowRow({ item, now }: { item: GithubSchedule; now: number }) {
+  const words = workflowCadence(item)
+  const result = plainResult(item.lastConclusion)
+  return (
+    <div role="listitem" className={`ui-row sc-timer${result.failed ? ' sc-bad' : ''}`} data-workflow={`${item.repo}/${item.workflow}`}>
+      <span className="ui-row-body">
+        <b>{item.workflow}</b>
+        <small>{item.repo}</small>
+        <small>{words && <>{words} </>}<code>{item.cron}</code></small>
+        {runLines({ lastRun: item.lastRun, lastResult: item.lastConclusion }, now).map(line => <small key={line}>{line}</small>)}
+      </span>
+      <span className="tk-tags"><span className={`ad-tag${item.state === 'active' ? ' on' : ''}`}>{item.state === 'active' ? 'Active' : item.state === 'disabled' ? 'Off' : 'Unknown'}</span></span>
+    </div>
+  )
+}
+
+/** The PC's tasks: the repo's own first, the rest under a fold, since reviewing them is the point but they are not what the page is for. */
+function PcTasks({ source, now }: { source: ScheduleSource; now: number }) {
+  const [open, setOpen] = useState(false)
+  const { ours, others } = splitTasks(source.items as PcTask[])
+  const cut = tasksCut(source.items.length, source.total)
+  return (
+    <>
+      {ours.length > 0 && <List label={source.label}>{ours.map(task => <TaskRow key={`${task.folder}/${task.name}`} task={task} now={now} />)}</List>}
+      {others.length > 0 && (
+        <Fold level={4} title={othersTitle(others.length)} open={open} onToggle={() => setOpen(value => !value)} data={{ 'data-fold': 'other-tasks' }}>
+          <List label={othersTitle(others.length)}>{others.map(task => <TaskRow key={`${task.folder}/${task.name}`} task={task} now={now} />)}</List>
+        </Fold>
+      )}
+      {cut && <p className="ad-note team-dim" data-tasks-cut>{cut}</p>}
+    </>
   )
 }
 
@@ -55,13 +106,15 @@ function SourceSection({ source, shown, now }: { source: ScheduleSource; shown: 
       <section className="sc-source" data-schedule-source={source.id} data-schedule-state={source.state} aria-label={source.label}>
         <p className="ad-note team-dim sc-from" data-schedule-from>{sourceLine(source, now)}</p>
         {warn && <p className="hub-banner ad-note" role="note" data-schedule-old>{warn}</p>}
-        {items.length > 0 && (
+        {source.note && <p className="ad-note team-dim" data-schedule-note>{source.note}</p>}
+        {items.length > 0 && source.id === 'pc-tasks' && <PcTasks source={source} now={now} />}
+        {items.length > 0 && source.id !== 'pc-tasks' && (
           <List label={source.label}>
             {source.id === 'hermes-jobs'
               ? (items as ScheduleJob[]).map(job => <JobRow key={`${job.profile}/${job.name}`} job={job} zone={source.timezone} on={job.name === shown} now={now} />)
-              : source.id === 'hermes-timers'
-                ? (items as ScheduleTimer[]).map(timer => <TimerRow key={timer.name} timer={timer} />)
-                : null}
+              : source.id === 'github'
+                ? (items as GithubSchedule[]).map(item => <WorkflowRow key={`${item.repo}/${item.workflow}/${item.cron}`} item={item} now={now} />)
+                : (items as ScheduleTimer[]).map(timer => <TimerRow key={timer.name} timer={timer} now={now} />)}
           </List>
         )}
         {!items.length && source.text && <p className="hub-empty" data-schedule-empty>{source.text}</p>}
@@ -127,7 +180,7 @@ function JobPage({ job, source }: { job: ScheduleJob | null; source: ScheduleSou
 
 /**
  * Team's third half: everything that runs on a schedule, from the settings export the Hermes host publishes. The Hermes jobs show all they
- * have; the other lists say "not reporting" until their data arrives. Read only. `head` is the Team heading and tabs, `page` the job whose
+ * have; the site host's timers, the PC's tasks and GitHub's schedules show what their own data holds, and say "not reporting" while it is missing. Read only. `head` is the Team heading and tabs, `page` the job whose
  * address is open (null on the list).
  */
 export default function SchedulesTab({ page, head, desktop }: { page: { source: 'hermes'; name: string } | null; head: ReactNode; desktop: boolean }) {

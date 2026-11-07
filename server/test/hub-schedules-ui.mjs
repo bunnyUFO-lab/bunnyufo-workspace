@@ -14,6 +14,8 @@ const fresh = await startHubFixture({ pc: 'fresh', hermes: true, agentConfig: 's
 const stale = await startHubFixture({ agentConfig: 'schedules-stale' });
 const plain = await startHubFixture({ agentConfig: 'fresh' });
 const bare = await startHubFixture({});
+const other = await startHubFixture({ agentConfig: 'schedules', otherSchedules: 'fresh' });
+const otherOld = await startHubFixture({ agentConfig: 'schedules', otherSchedules: 'old' });
 
 // The alert the Hub writes when a prompt changed on the host: Today links it to the job's page.
 seeder(fresh.fake).event(eventJson({ kind: 'alert', title: 'The prompt of brief-weekly-report changed on the Hermes host, not from Schedules. Check it.', source: 'hub', extra: { job: 'brief-weekly-report' } }));
@@ -177,6 +179,46 @@ try {
   assert.equal(flat(await none.locator('[data-schedule-source="hermes-jobs"] [data-schedule-empty]').innerText()), 'The Hermes host has not published its settings yet.');
   assert.equal(await none.locator('[data-job]').count(), 0);
 
+  step('390: the site host, the PC and GitHub list what they report; the repo\'s tasks show, the others fold; nothing sideways');
+  const full = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+  await full.goto(`${other.url}#/~hub/team/schedules`);
+  await full.locator('[data-timer="fixture-publish.timer"]').waitFor();
+  assert.deepEqual(await sections(full), [['hermes-jobs', 'live'], ['hermes-timers', 'live'], ['site-timers', 'live'], ['pc-tasks', 'live'], ['github', 'live']]);
+  assert.match(flat(await full.locator('[data-schedule-source="site-timers"] [data-schedule-from]').innerText()), /^Site host, \d+ minutes? ago$/);
+  const publish = full.locator('[data-timer="fixture-publish.timer"]');
+  assert.match(flat(await publish.innerText()), /^fixture-publish\.timer Publishes the fixture pages OnCalendar=\*:0\/15, OnBootSec=2min Next .* Last .* ago: Worked On$/);
+  assert.match(flat(await full.locator('[data-timer="fixture-backup.timer"]').innerText()), /Failed \(exit-code\)/);
+  assert.equal(await full.locator('[data-timer="fixture-backup.timer"]').evaluate(row => row.classList.contains('sc-bad')), true);
+  assert.doesNotMatch(flat(await full.locator('[data-timer="fixture-idle.timer"]').innerText()), /Next /, 'A timer that is off promises no next run.');
+  assert.deepEqual(await full.locator('[data-schedule-source="pc-tasks"] [data-task]').evaluateAll(list => list.map(row => row.getAttribute('data-task'))), ['Sample Report', 'Sample Nightly'], 'only the repo\'s own tasks show until the fold opens');
+  assert.match(flat(await full.locator('[data-task="Sample Report"]').innerText()), /Mondays, Fridays at 08:00 Next .* Last .* ago: Worked Ready$/);
+  assert.equal(flat(await full.locator('[data-task="Sample Nightly"] [data-task-state]').innerText()), 'Running');
+  const fold = full.locator('[data-fold="other-tasks"]');
+  assert.equal(flat(await fold.locator('.ui-fold-head').innerText()), "Other programs' tasks (2)");
+  assert.equal(await fold.locator('.ui-fold-head').getAttribute('aria-expanded'), 'false');
+  assert.equal(flat(await full.locator('[data-tasks-cut]').innerText()), 'Showing 4 of 7 tasks.');
+  await fold.locator('.ui-fold-head').tap();
+  assert.deepEqual(await full.locator('[data-schedule-source="pc-tasks"] [data-task]').evaluateAll(list => list.map(row => row.getAttribute('data-task'))), ['Sample Report', 'Sample Nightly', 'Example Updater', 'Example Helper']);
+  assert.match(flat(await full.locator('[data-task="Example Updater"]').innerText()), /Failed \(error 0x80070002\)/);
+  assert.equal(flat(await full.locator('[data-task="Example Helper"] [data-task-state]').innerText()), 'Off');
+  assert.doesNotMatch(flat(await full.locator('[data-task="Example Helper"]').innerText()), /Next /);
+  assert.equal(flat(await full.locator('[data-schedule-source="github"] [data-schedule-note]').innerText()), "GitHub's list comes through the PC, so it is as old as the PC's last report.");
+  const ci = full.locator('[data-workflow="example-org/fixture-app/ci.yml"]');
+  assert.match(flat(await ci.innerText()), /^ci\.yml example-org\/fixture-app Every day at 03:17, UTC 17 3 \* \* \* Last .* ago: Worked Active$/);
+  assert.match(flat(await full.locator('[data-workflow="example-org/fixture-app/nightly.yml"]').innerText()), /Failed \(failure\) Off$/);
+  assert.doesNotMatch(flat(await full.locator('[data-schedule-source="pc-tasks"]').innerText()), /exe|\.ps1|C:/i, 'no action, argument or path');
+  await noSideways(full, 'Schedules with every list at 390');
+
+  step('1280: a PC list 4 hours old and a host file 3 hours old are marked old and keep their rows');
+  const later = await open({ width: 1280, height: 800 });
+  await later.goto(`${otherOld.url}#/~hub/team/schedules`);
+  await later.locator('[data-timer="fixture-publish.timer"]').waitFor();
+  assert.deepEqual(await sections(later), [['hermes-jobs', 'live'], ['hermes-timers', 'live'], ['site-timers', 'old'], ['pc-tasks', 'old'], ['github', 'old']]);
+  assert.equal(flat(await later.locator('[data-schedule-source="site-timers"] [data-schedule-old]').innerText()), 'Last heard from 3 hours ago; these may be out of date.');
+  assert.equal(flat(await later.locator('[data-schedule-source="pc-tasks"] [data-schedule-old]').innerText()), 'Last heard from 4 hours ago; these may be out of date.');
+  assert.equal(await later.locator('[data-workflow]').count(), 2);
+  await noSideways(later, 'Schedules with old lists at 1280');
+
   step('signed out: the route answers 401, the tab shows the sign-in line, and Agents still shows');
   const guestContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   contexts.push(guestContext);
@@ -194,5 +236,5 @@ try {
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
-  for (const fixture of [fresh, stale, plain, bare]) await fixture.close();
+  for (const fixture of [fresh, stale, plain, bare, other, otherOld]) await fixture.close();
 }

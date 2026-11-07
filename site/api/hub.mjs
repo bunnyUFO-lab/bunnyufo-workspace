@@ -13,6 +13,8 @@
 // write through this process clears; everything else, writes and sweeps included, lists live.
 import { createApplyPoke } from './hub-apply-poke.mjs';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
+import nodePath from 'node:path';
 import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
@@ -50,6 +52,7 @@ import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, check
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
 import { teamSkills } from './hub-team-skills.mjs';
+import { cleanHostSchedules, HOST_SCHEDULES_FILE, HOST_SCHEDULES_MAX_BYTES } from './hub-other-schedules.mjs';
 import { jobPromptChanges, schedulesView, SEEN_FILE, seenText, validSeen } from './hub-schedules.mjs';
 import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
@@ -416,6 +419,22 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       marks.get(name).push(entry);
     }
     return marks;
+  }
+
+  /**
+   * The site host's timer file, which sits in the folder of the API's env file (no setting of its own), or null: no env file, no such file, too big,
+   * or not a file this version reads. The dev stack has none, and the page then says "not reporting". Read on each request; it is a few KB.
+   */
+  async function loadHostSchedules() {
+    const envFile = String(env.BUW_ENV_FILE ?? '').trim();
+    if (!envFile) return null;
+    try {
+      const file = nodePath.join(nodePath.dirname(envFile), HOST_SCHEDULES_FILE);
+      if ((await stat(file)).size > HOST_SCHEDULES_MAX_BYTES) return null;
+      return cleanHostSchedules(await readFile(file, 'utf8'));
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -2046,7 +2065,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             if (requireRemoteUser && !user) throw fail('Sign in to see the schedules.', 401);
             const exported = await loadAgentConfig(at).catch(() => null);
             void noteJobPrompts(at);
-            reply(schedulesView({ exported, status: null, hostFile: null, at }));
+            const [status, hostFile] = await Promise.all([loadPcStatus(at).catch(() => null), loadHostSchedules()]);
+            reply(schedulesView({ exported, status, hostFile, at }));
           } else if (route === '/hub/team/templates') {
             // The templates carry their prompt text: same rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the templates.', 401);

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  agoWords, cadenceWords, clock, clockBoth, isSchedulesRoute, jobHash, jobSummary, modelWords, oldLine, onWords, promptNotes, resultWords, scheduleOf, sourceLine, targetWords, troubled, zoneName,
+  agoWords, cadenceWords, clock, clockBoth, isSchedulesRoute, jobHash, jobSummary, modelWords, oldLine, onWords, othersTitle, plainResult, promptNotes, resultWords, runLines, scheduleOf, sourceLine, splitTasks,
+  targetWords, taskStateWords, tasksCut, troubled, workflowCadence, zoneName,
 } from '../../src/hub/team/schedulesModel.ts';
 
 test('a job address is one encoded segment and comes back whole; the list and other sources are not a job', () => {
@@ -106,4 +107,26 @@ test("model, targets and prompt notes in the page's words", () => {
   assert.deepEqual(promptNotes({}), []);
   assert.deepEqual(promptNotes({ promptCut: true, promptRedacted: 2 }), ['This is the first part of the prompt. The export cuts a long one.', '2 secret-like texts were replaced with [redacted].']);
   assert.deepEqual(promptNotes({ promptRedacted: 1 }), ['1 secret-like text was replaced with [redacted].']);
+});
+
+test("the PC, GitHub and site host rows in the page's words", () => {
+  assert.deepEqual(plainResult('ok'), { label: 'Worked', failed: false });
+  assert.deepEqual(plainResult('error 0x80070002'), { label: 'Failed (error 0x80070002)', failed: true });
+  assert.deepEqual(plainResult('exit-code'), { label: 'Failed (exit-code)', failed: true });
+  assert.deepEqual(plainResult('failure'), { label: 'Failed (failure)', failed: true });
+  assert.deepEqual(plainResult('not run yet'), { label: 'Not run yet', failed: false });
+  assert.deepEqual(plainResult(undefined), { label: '', failed: false });
+  assert.deepEqual([taskStateWords('running'), taskStateWords('disabled')], [{ label: 'Running', on: true }, { label: 'Off', on: false }]);
+  const { ours, others } = splitTasks([{ name: 'a', ours: true }, { name: 'b' }, { name: 'c', ours: true }, { name: 'd' }, { name: 'e' }]);
+  assert.deepEqual([ours.map(task => task.name), others.map(task => task.name)], [['a', 'c'], ['b', 'd', 'e']]);
+  assert.equal(othersTitle(others.length), "Other programs' tasks (3)");
+  assert.equal(tasksCut(60, 212), 'Showing 60 of 212 tasks.');
+  assert.equal(tasksCut(4, 4), '');
+  assert.equal(tasksCut(4, undefined), '');
+  assert.equal(workflowCadence({ cron: '17 3 * * *' }), 'Every day at 03:17, UTC');
+  assert.equal(workflowCadence({ cron: '0 0 L * ?' }), '');
+  const now = Date.parse('2026-11-01T12:00:00Z');
+  assert.deepEqual(runLines({ nextRun: '2026-11-02T08:00:00Z', lastRun: '2026-11-01T09:00:00Z', lastResult: 'ok' }, now, true, 'UTC'), ['Next Mon 2 Nov 08:00', 'Last 3 hours ago: Worked']);
+  assert.deepEqual(runLines({ nextRun: '2026-11-02T08:00:00Z', lastResult: 'not run yet' }, now, false, 'UTC'), ['Last result: Not run yet'], 'an off row promises no next run');
+  assert.deepEqual(runLines({}, now), []);
 });
